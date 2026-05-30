@@ -161,6 +161,14 @@ class WasmIrToText(
         )
             indent++
 
+        if (wasmInstr.operator == WasmOp.RETURN_CALL_INDIRECT) {
+            // wabt 1.0.19 only accepts the canonical `return_call_indirect (type X)` form here.
+            wasmInstr.forEachImmediates { imm ->
+                if (imm is WasmImmediate.TypeIdx) appendImmediate(imm)
+            }
+            stringBuilder.append(wasmInstr.operator.tailMnemonic)
+            return
+        }
         if (wasmInstr.operator in setOf(WasmOp.CALL_INDIRECT, WasmOp.TABLE_INIT)) {
             val reversed = mutableListOf<WasmImmediate>()
             wasmInstr.forEachImmediates(reversed::add)
