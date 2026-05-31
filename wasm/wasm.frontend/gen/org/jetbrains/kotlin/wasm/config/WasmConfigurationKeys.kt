@@ -77,6 +77,10 @@ object WasmConfigurationKeys {
     @JvmField
     val WASM_GENERATE_CLOSED_WORLD_MULTIMODULE = CompilerConfigurationKey.create<Boolean>("WASM_GENERATE_CLOSED_WORLD_MULTIMODULE")
 
+    // Emit native Wasm tail-call instructions (return_call / return_call_ref) for non-tailrec tail calls.
+    @JvmField
+    val WASM_ENABLE_TAIL_CALLS = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_TAIL_CALLS")
+
 }
 
 var CompilerConfiguration.wasmEnableArrayRangeChecks: Boolean
@@ -150,4 +154,8 @@ var CompilerConfiguration.wasmInternalLocalVariablePrefix: String?
 var CompilerConfiguration.wasmGenerateClosedWorldMultimodule: Boolean
     get() = getBoolean(WasmConfigurationKeys.WASM_GENERATE_CLOSED_WORLD_MULTIMODULE)
     set(value) { put(WasmConfigurationKeys.WASM_GENERATE_CLOSED_WORLD_MULTIMODULE, value) }
+
+var CompilerConfiguration.wasmEnableTailCalls: Boolean
+    get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS)
+    set(value) { put(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS, value) }
 

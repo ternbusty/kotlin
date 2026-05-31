@@ -50,6 +50,43 @@ class BodyGenerator(
 
     private val unitGetInstance by lazy { backendContext.findUnitGetInstanceFunction() }
 
+    /**
+     * IrCall sites that lexically appear in tail position inside the current function and are
+     * therefore candidates for emission as `return_call`. Computed once per function; per-call
+     * eligibility (signature match, constructor callee, etc.) is checked at the emit site by
+     * [isEligibleForTailCall].
+     */
+    private val tailCallCandidates: Set<IrCall> by lazy {
+        if (backendContext.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS) == false) {
+            emptySet()
+        } else {
+            functionContext.irFunction?.let { collectWasmTailCallCandidates(it) } ?: emptySet()
+        }
+    }
+
+    private val callerWasmResultTypes: List<WasmType> by lazy {
+        val caller = functionContext.irFunction ?: return@lazy emptyList()
+        listOfNotNull(wasmModuleTypeTransformer.transformResultType(caller.returnType))
+    }
+
+    /**
+     * Returns true if [call] should be emitted as a tail call. Eligibility filters applied on top
+     * of the structural tail-position check performed by [collectWasmTailCallCandidates]:
+     *
+     * - The callee is not a constructor: [visitFunctionReturn] pushes the implicit dispatch
+     *   receiver before `return`, incompatible with a tail-call frame swap.
+     * - Caller and callee Wasm result-type signatures match: `return_call` requires the callee's
+     *   result types to equal the caller's. Long/Int/Unit/value-class differences are already
+     *   lowered to concrete WasmTypes by [wasmModuleTypeTransformer].
+     */
+    private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
+        if (call !is IrCall) return false
+        if (call !in tailCallCandidates) return false
+        if (callee is IrConstructor) return false
+        val calleeWasmResultTypes = listOfNotNull(wasmModuleTypeTransformer.transformResultType(callee.returnType))
+        return calleeWasmResultTypes == callerWasmResultTypes
+    }
+
     fun WasmExpressionBuilder.buildGetUnit() {
         buildInstr(
             WasmOp.CALL_PURE,
@@ -828,6 +865,7 @@ class BodyGenerator(
 
         val function: IrFunction = callFunction.realOverrideTarget
         val isSuperCall = call is IrCall && call.superQualifierSymbol != null
+        val isTail = isEligibleForTailCall(call, function)
         if (function is IrSimpleFunction && function.isOverridable && !isSuperCall) {
             val originalClass = callFunction.parentAsClass
             val realOverrideTargetClass = function.parentAsClass
@@ -905,10 +943,16 @@ class BodyGenerator(
             body.commentGroupEnd()
         } else {
             // Static function call
-            body.buildCall(declarationCodegenContext.referenceFunction(function.symbol), location)
+            if (isTail) {
+                body.buildReturnCall(declarationCodegenContext.referenceFunction(function.symbol), location)
+            } else {
+                body.buildCall(declarationCodegenContext.referenceFunction(function.symbol), location)
+            }
         }
 
-        // Unit types don't cross function boundaries
+        // Unit types don't cross function boundaries. The trailing get_unit is unreachable after a
+        // tail call but Kotlin/Wasm's generateAsStatement still expects the value on the IR stack
+        // to drop, so we keep emitting it on both paths.
         if (function.returnType.isUnit() && function !is IrConstructor) {
             body.buildGetUnit()
         }
