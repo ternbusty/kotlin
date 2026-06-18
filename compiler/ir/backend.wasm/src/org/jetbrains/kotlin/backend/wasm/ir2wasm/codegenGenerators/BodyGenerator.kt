@@ -64,27 +64,25 @@ class BodyGenerator(
         }
     }
 
-    private val callerWasmResultTypes: List<WasmType> by lazy {
-        val caller = functionContext.irFunction ?: return@lazy emptyList()
-        listOfNotNull(wasmModuleTypeTransformer.transformResultType(caller.returnType))
-    }
-
     /**
      * Returns true if [call] should be emitted as a tail call. Eligibility filters applied on top
      * of the structural tail-position check performed by [collectWasmTailCallCandidates]:
      *
-     * - The callee is not a constructor: [visitFunctionReturn] pushes the implicit dispatch
-     *   receiver before `return`, incompatible with a tail-call frame swap.
-     * - Caller and callee Wasm result-type signatures match: `return_call` requires the callee's
-     *   result types to equal the caller's. Long/Int/Unit/value-class differences are already
-     *   lowered to concrete WasmTypes by [wasmModuleTypeTransformer].
+     * - The callee must not be a constructor, because in the case of a constructor
+     *   [visitFunctionReturn] pushes the implicit dispatch receiver before `return`, which is
+     *   incompatible with a tail-call frame swap.
+     * - The Wasm result type of the caller must match that of the callee, because `return_call`
+     *   requires the callee's result type to equal the caller's. Long/Int/Unit/value-class
+     *   differences are already lowered to concrete WasmTypes by [wasmModuleTypeTransformer].
      */
     private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
         if (call !is IrCall) return false
         if (call !in tailCallCandidates) return false
         if (callee is IrConstructor) return false
-        val calleeWasmResultTypes = listOfNotNull(wasmModuleTypeTransformer.transformResultType(callee.returnType))
-        return calleeWasmResultTypes == callerWasmResultTypes
+        val caller = functionContext.irFunction ?: return false
+        val callerResultType = wasmModuleTypeTransformer.transformResultType(caller.returnType)
+        val calleeResultType = wasmModuleTypeTransformer.transformResultType(callee.returnType)
+        return callerResultType == calleeResultType
     }
 
     fun WasmExpressionBuilder.buildGetUnit() {
