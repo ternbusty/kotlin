@@ -892,7 +892,7 @@ class BodyGenerator(
                 body.buildStructGet(typeCodegenContext.referenceGcType(klassSymbol), ANY_VTABLE_FIELD_ID, location)
                 val vTableSlotId = vfSlot + 1 //First element is always contains Special ITable
                 body.buildStructGet(vTableGcTypeReference, vTableSlotId, location)
-                body.buildInstr(WasmOp.CALL_REF, location, functionTypeReference)
+                body.buildInstr(if (isTail) WasmOp.RETURN_CALL_REF else WasmOp.CALL_REF, location, functionTypeReference)
             } else {
                 generateExpression(call.dispatchReceiver!!)
 
@@ -933,7 +933,7 @@ class BodyGenerator(
                 body.buildStructGet(vTableGcTypeReference, vfSlot, location)
 
                 body.buildInstr(
-                    WasmOp.CALL_REF,
+                    if (isTail) WasmOp.RETURN_CALL_REF else WasmOp.CALL_REF,
                     location,
                     functionTypeReference
                 )
