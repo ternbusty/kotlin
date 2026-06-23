@@ -63,14 +63,22 @@ class BodyGenerator(
      *   a tail-call frame swap.
      * - The Wasm result type of the caller must match that of the callee, because
      *   `return_call` requires the callee's result type to equal the caller's.
+     *
+     * [calleeReturnType] defaults to the callee's declared return type. Indirect (callRef)
+     * dispatch passes the concrete result type the wasm function type is built from,
+     * because the callRef intrinsic itself declares the erased type parameter `T`.
      */
-    private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
+    private fun isEligibleForTailCall(
+        call: IrFunctionAccessExpression,
+        callee: IrFunction,
+        calleeReturnType: IrType = callee.returnType,
+    ): Boolean {
         if (call !is IrCall) return false
         if (call.origin !== WASM_TAIL_CALL) return false
         if (callee is IrConstructor) return false
         val caller = functionContext.irFunction ?: return false
         val callerResultType = wasmModuleTypeTransformer.transformResultType(caller.returnType)
-        val calleeResultType = wasmModuleTypeTransformer.transformResultType(callee.returnType)
+        val calleeResultType = wasmModuleTypeTransformer.transformResultType(calleeReturnType)
         return callerResultType == calleeResultType
     }
 
@@ -834,8 +842,13 @@ class BodyGenerator(
             callRefArguments.forEach { generateExpression(it!!) }
             val functionTypeReference = typeCodegenContext.referenceWasmFunctionType(wasmFunctionType)
             generateExpression(call.arguments[0]!!)
-            body.buildInstr(WasmOp.CALL_REF, location, functionTypeReference)
-            if (resultType.isUnit())
+            val isTailCallRef = isEligibleForTailCall(call, call.symbol.owner, calleeReturnType = resultType)
+            body.buildInstr(
+                if (isTailCallRef) WasmOp.RETURN_CALL_REF else WasmOp.CALL_REF,
+                location,
+                functionTypeReference,
+            )
+            if (!isTailCallRef && resultType.isUnit())
                 body.buildGetUnit()
             return
         }
