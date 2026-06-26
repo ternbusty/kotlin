@@ -92,7 +92,9 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val transformed = mutableSetOf<IrSimpleFunction>()
 
         for (f in allFunctions) {
-            normalizeReturnWhen(f)
+            if (hasReturnWhenWithCtorCall(f)) {
+                normalizeReturnWhen(f)
+            }
         }
 
         // Collect TMC sites per function and build edges (caller -> callee) within the file.
@@ -327,6 +329,44 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     }
 
     // -------------------------------------------------------------- return-when normalization
+
+    private fun hasReturnWhenWithCtorCall(func: IrSimpleFunction): Boolean {
+        val funcSymbol = func.symbol
+        var found = false
+        func.body?.acceptVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) {
+                if (!found) element.acceptChildrenVoid(this)
+            }
+            override fun visitFunction(declaration: IrFunction) {}
+            override fun visitReturn(expression: IrReturn) {
+                if (found) return
+                if (expression.returnTargetSymbol != funcSymbol) {
+                    expression.acceptChildrenVoid(this)
+                    return
+                }
+                val value = expression.value
+                if (value is IrWhen) {
+                    for (branch in value.branches) {
+                        if (branchHasCtorWithCall(branch.result)) {
+                            found = true
+                            return
+                        }
+                    }
+                }
+            }
+        })
+        return found
+    }
+
+    private fun branchHasCtorWithCall(expr: IrExpression): Boolean = when (expr) {
+        is IrConstructorCall -> expr.arguments.any { it is IrCall }
+        is IrBlock -> {
+            val last = expr.statements.lastOrNull()
+            last is IrConstructorCall && last.arguments.any { it is IrCall }
+        }
+        is IrWhen -> expr.branches.any { branchHasCtorWithCall(it.result) }
+        else -> false
+    }
 
     private fun normalizeReturnWhen(func: IrSimpleFunction) {
         val body = func.body as? IrBlockBody ?: return
