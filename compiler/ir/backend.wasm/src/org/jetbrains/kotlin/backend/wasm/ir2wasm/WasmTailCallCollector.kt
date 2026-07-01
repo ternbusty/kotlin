@@ -42,70 +42,68 @@ internal fun collectWasmTailCallCandidates(irFunction: IrFunction): Set<IrCall> 
     val isUnitReturn = irFunction.returnType.isUnit()
     val result = mutableSetOf<IrCall>()
 
-    class VisitorState(val isTailExpression: Boolean)
-
-    val visitor = object : IrVisitor<Unit, VisitorState>() {
-        override fun visitElement(element: IrElement, data: VisitorState) {
-            element.acceptChildren(this, VisitorState(isTailExpression = false))
+    val visitor = object : IrVisitor<Unit, Boolean>() {
+        override fun visitElement(element: IrElement, data: Boolean) {
+            element.acceptChildren(this, false)
         }
 
-        override fun visitFunction(declaration: IrFunction, data: VisitorState) {
+        override fun visitFunction(declaration: IrFunction, data: Boolean) {
             // Local functions have their own tail-position frame; skip.
         }
 
-        override fun visitClass(declaration: IrClass, data: VisitorState) {
+        override fun visitClass(declaration: IrClass, data: Boolean) {
             // Local classes likewise.
         }
 
-        override fun visitTry(aTry: IrTry, data: VisitorState) {
+        override fun visitTry(aTry: IrTry, data: Boolean) {
             // A tail call out of try-catch-finally would drop the handler frame; not supported.
         }
 
-        override fun visitReturn(expression: IrReturn, data: VisitorState) {
+        override fun visitReturn(expression: IrReturn, data: Boolean) {
             val isTail = expression.returnTargetSymbol == irFunction.symbol
-            expression.value.accept(this, VisitorState(isTail))
+            expression.value.accept(this, isTail)
         }
 
-        override fun visitExpressionBody(body: IrExpressionBody, data: VisitorState) =
+        override fun visitExpressionBody(body: IrExpressionBody, data: Boolean) =
             body.acceptChildren(this, data)
 
-        override fun visitBlockBody(body: IrBlockBody, data: VisitorState) =
+        override fun visitBlockBody(body: IrBlockBody, data: Boolean) =
             visitStatementContainer(body, data)
 
-        override fun visitContainerExpression(expression: IrContainerExpression, data: VisitorState) =
+        override fun visitContainerExpression(expression: IrContainerExpression, data: Boolean) =
             visitStatementContainer(expression, data)
 
-        private fun visitStatementContainer(expression: IrStatementContainer, data: VisitorState) {
+        private fun visitStatementContainer(expression: IrStatementContainer, data: Boolean) {
             expression.statements.forEachIndexed { index, irStatement ->
                 val isTailStatement = if (index == expression.statements.lastIndex) {
-                    data.isTailExpression
+                    data
                 } else {
                     isUnitReturn && expression.statements[index + 1].let {
                         it is IrReturn && it.returnTargetSymbol == irFunction.symbol && it.value.isUnitRead()
                     }
                 }
-                irStatement.accept(this, VisitorState(isTailStatement))
+                irStatement.accept(this, isTailStatement)
             }
         }
 
         private fun IrExpression.isUnitRead(): Boolean =
             this is IrGetObjectValue && symbol.isClassWithFqName(StandardNames.FqNames.unit)
 
-        override fun visitWhen(expression: IrWhen, data: VisitorState) {
+        override fun visitWhen(expression: IrWhen, data: Boolean) {
             expression.branches.forEach {
-                it.condition.accept(this, VisitorState(isTailExpression = false))
+                it.condition.accept(this, false)
                 it.result.accept(this, data)
             }
         }
 
-        override fun visitCall(expression: IrCall, data: VisitorState) {
-            expression.acceptChildren(this, VisitorState(isTailExpression = false))
-            if (data.isTailExpression) {
+        override fun visitCall(expression: IrCall, data: Boolean) {
+            expression.acceptChildren(this, false)
+            if (data) {
                 result.add(expression)
             }
         }
     }
 
-    irFunction.body?.accept(visitor, VisitorState(isTailExpression = true))
+    irFunction.body?.accept(visitor, true)
     return result
 }
