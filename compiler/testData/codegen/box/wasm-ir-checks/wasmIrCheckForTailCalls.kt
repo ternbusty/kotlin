@@ -1,4 +1,5 @@
 // TARGET_BACKEND: WASM
+// ENABLE_TAIL_CALLS
 
 // Direct static tail call
 // WASM_CHECK_INSTRUCTION_IN_FUNCTION: instruction=return_call inFunction=staticTailCaller
