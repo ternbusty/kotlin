@@ -27,6 +27,7 @@ import org.jetbrains.kotlin.ir.util.isNullable
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
+import org.jetbrains.kotlin.backend.wasm.lower.WASM_TAIL_CALL
 import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
 import org.jetbrains.kotlin.wasm.ir.*
 import org.jetbrains.kotlin.wasm.ir.source.location.SourceLocation
@@ -51,33 +52,21 @@ class BodyGenerator(
     private val unitGetInstance by lazy { backendContext.findUnitGetInstanceFunction() }
 
     /**
-     * IrCall sites that lexically appear in tail position inside the current function and are
-     * therefore candidates for emission as `return_call`. Computed once per function; per-call
-     * eligibility (signature match, constructor callee, etc.) is checked at the emit site by
-     * [isEligibleForTailCall].
-     */
-    private val tailCallCandidates: Set<IrCall> by lazy {
-        if (backendContext.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS) == false) {
-            emptySet()
-        } else {
-            functionContext.irFunction?.let { collectWasmTailCallCandidates(it) } ?: emptySet()
-        }
-    }
-
-    /**
-     * Returns true if [call] should be emitted as a tail call. Eligibility filters applied on top
-     * of the structural tail-position check performed by [collectWasmTailCallCandidates]:
+     * Returns true if [call] should be emitted as a tail call.
      *
-     * - The callee must not be a constructor, because in the case of a constructor
-     *   [visitFunctionReturn] pushes the implicit dispatch receiver before `return`, which is
-     *   incompatible with a tail-call frame swap.
-     * - The Wasm result type of the caller must match that of the callee, because `return_call`
-     *   requires the callee's result type to equal the caller's. Long/Int/Unit/value-class
-     *   differences are already lowered to concrete WasmTypes by [wasmModuleTypeTransformer].
+     * [WasmTailCallLowering] marks structurally tail-positioned calls with
+     * [WASM_TAIL_CALL] origin. This method applies additional Wasm-level eligibility
+     * filters on top of that structural check:
+     *
+     * - The callee must not be a constructor, because [visitFunctionReturn] pushes
+     *   the implicit dispatch receiver before `return`, which is incompatible with
+     *   a tail-call frame swap.
+     * - The Wasm result type of the caller must match that of the callee, because
+     *   `return_call` requires the callee's result type to equal the caller's.
      */
     private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
         if (call !is IrCall) return false
-        if (call !in tailCallCandidates) return false
+        if (call.origin !== WASM_TAIL_CALL) return false
         if (callee is IrConstructor) return false
         val caller = functionContext.irFunction ?: return false
         val callerResultType = wasmModuleTypeTransformer.transformResultType(caller.returnType)

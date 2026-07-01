@@ -1,4 +1,5 @@
 // TARGET_BACKEND: WASM
+// ENABLE_TAIL_CALLS
 
 // Stress test for native Wasm tail call emission. Each pattern recurses at a depth that would
 // stack-overflow on the host JS engine if the calls were not lowered to `return_call` / `return_call_ref`.
