@@ -903,10 +903,11 @@ class BodyGenerator(
             }
         } else {
             // Static function call
+            val functionReference = declarationCodegenContext.referenceFunction(function.symbol)
             if (isTail) {
-                body.buildReturnCall(declarationCodegenContext.referenceFunction(function.symbol), location)
+                body.buildReturnCall(functionReference, location)
             } else {
-                body.buildCall(declarationCodegenContext.referenceFunction(function.symbol), location)
+                body.buildCall(functionReference, location)
             }
         }
 
