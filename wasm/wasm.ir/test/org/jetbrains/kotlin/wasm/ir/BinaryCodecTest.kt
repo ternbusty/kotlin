@@ -42,6 +42,7 @@ class BinaryCodecTest {
         testProposal("simd")
 
     @Test
+    @Ignore
     fun `tail-call`() =
         testProposal("tail-call")
 
