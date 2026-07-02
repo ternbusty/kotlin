@@ -106,6 +106,16 @@ class KotlinWasmCompilerArguments : CommonJsAndWasmCompilerArguments() {
         }
 
     @Argument(
+        value = "-Xwasm-enable-stackless-recursion",
+        description = "Compile known deeply recursive code to stackless state machines with heap frames.",
+    )
+    var wasmEnableStacklessRecursion: Boolean = false
+        set(value) {
+            checkFrozen()
+            field = value
+        }
+
+    @Argument(
         value = "-Xwasm-enable-tail-calls",
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect).",
     )

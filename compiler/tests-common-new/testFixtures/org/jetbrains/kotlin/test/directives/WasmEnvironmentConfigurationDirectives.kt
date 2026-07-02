@@ -34,6 +34,10 @@ object WasmEnvironmentConfigurationDirectives : SimpleDirectivesContainer() {
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect)"
     )
 
+    val ENABLE_STACKLESS_RECURSION by directive(
+        description = "Compile known deeply recursive code to stackless state machines with heap frames"
+    )
+
     @OptIn(SensitiveDirectiveAPI::class)
     val WASM_IGNORE_FOR by valueDirective(
         description = """

@@ -292,6 +292,17 @@ val actualWasmArguments by compilerArgumentsLevel(CompilerArgumentsLevelNames.wa
     }
 
     compilerArgument {
+        name = "Xwasm-enable-stackless-recursion"
+        description = "Compile known deeply recursive code to stackless state machines with heap frames.".asReleaseDependent()
+        valueType = BooleanType.defaultFalse
+
+        lifecycle(
+            introducedVersion = KotlinReleaseVersion.v2_4_20,
+        )
+        restrictedToCompilerPhase = KotlinCompilerPhase.BACKEND_COMPILATION
+    }
+
+    compilerArgument {
         name = "Xwasm-enable-tail-calls"
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect).".asReleaseDependent()
         valueType = BooleanType.defaultFalse
