@@ -156,6 +156,7 @@ val wasmLowerings: List<NamedCompilerPhase<WasmBackendContext, IrModuleFragment,
     ::RangeContainsLowering,
 
     ::WasmTailrecLowering,
+    ::WasmVirtualCpsLowering,
 
     ::EnumWhenLowering,
     ::EnumClassConstructorLowering,

@@ -89,6 +89,10 @@ object WasmConfigurationKeys {
     @JvmField
     val WASM_ENABLE_TAIL_CALLS = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_TAIL_CALLS")
 
+    // Compile known deeply recursive code (stdlib regex matcher, DeepRecursiveFunction bodies) to stackless state machines with heap frames.
+    @JvmField
+    val WASM_ENABLE_STACKLESS_RECURSION = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_STACKLESS_RECURSION")
+
 }
 
 var CompilerConfiguration.wasmEnableArrayRangeChecks: Boolean
@@ -174,4 +178,8 @@ var CompilerConfiguration.wasmTestBoxFunctionToExport: FqName?
 var CompilerConfiguration.wasmEnableTailCalls: Boolean
     get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS)
     set(value) { put(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS, value) }
+
+var CompilerConfiguration.wasmEnableStacklessRecursion: Boolean
+    get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION)
+    set(value) { put(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION, value) }
 
