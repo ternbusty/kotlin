@@ -239,5 +239,15 @@ public interface WasmCompilerLinkingArguments : WasmCompilerArguments,
     @ExperimentalCompilerArgument
     public val X_WASM_USE_STACK_SWITCHING_PROPOSAL: WasmCompilerLinkingArgument<Boolean> =
         WasmCompilerLinkingArgument("X_WASM_USE_STACK_SWITCHING_PROPOSAL", KotlinReleaseVersion(2, 4, 20))
+
+    /**
+     * Emit WebAssembly tail call instructions (return_call / return_call_indirect).
+     *
+     * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.
+     */
+    @JvmField
+    @ExperimentalCompilerArgument
+    public val X_WASM_ENABLE_TAIL_CALLS: WasmCompilerLinkingArgument<Boolean> =
+        WasmCompilerLinkingArgument("X_WASM_ENABLE_TAIL_CALLS", KotlinReleaseVersion(2, 4, 20))
   }
 }
