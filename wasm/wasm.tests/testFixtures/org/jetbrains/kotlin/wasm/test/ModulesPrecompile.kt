@@ -42,6 +42,7 @@ internal enum class PrecompileSetup(
     val wasmCoroutinesStackSwitching: Boolean,
     val stdlibOutputDir: File,
     val kotlinTestOutputDir: File,
+    val stacklessRecursion: Boolean = false,
 ) {
     REGULAR(
         debugFriendly = false,
@@ -70,6 +71,14 @@ internal enum class PrecompileSetup(
         wasmCoroutinesStackSwitching = false,
         stdlibOutputDir = File(outputDir, "out/precompile_debug_friendly/$precompiledStdlibOutputName"),
         kotlinTestOutputDir = File(outputDir, "out/precompile_debug_friendly/$precompiledKotlinTestOutputName")
+    ),
+    STACKLESS_RECURSION(
+        debugFriendly = false,
+        newExceptionProposal = false,
+        wasmCoroutinesStackSwitching = false,
+        stacklessRecursion = true,
+        stdlibOutputDir = File(outputDir, "out/precompile_stackless_recursion/$precompiledStdlibOutputName"),
+        kotlinTestOutputDir = File(outputDir, "out/precompile_stackless_recursion/$precompiledKotlinTestOutputName")
     ),
 }
 
@@ -102,6 +111,7 @@ internal fun precompileWasmModules(setup: PrecompileSetup) {
             wasmUseNewExceptionProposal = setup.newExceptionProposal
             wasmForceDebugFriendlyCompilation = setup.debugFriendly
             wasmUseStackSwitchingProposal = setup.wasmCoroutinesStackSwitching
+            wasmEnableStacklessRecursion = setup.stacklessRecursion
             this.libraries = libraries
             this.includes = includes
         }

@@ -80,6 +80,7 @@ internal abstract class AbstractSet(val type: Int = 0) {
      * @param matchResult - MatchResult to sore result into.
      * @return -1 if match fails or n > 0;
      */
+    @kotlin.internal.StacklessRecursion
     abstract fun matches(startIndex: Int, testString: CharSequence, matchResult: MatchResultImpl): Int
 
     /**

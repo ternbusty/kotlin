@@ -41,6 +41,7 @@ abstract class AbstractWasmJsCodegenSingleModuleRegularStdTest(
                 precompileWasmModules(PrecompileSetup.REGULAR)
                 precompileWasmModules(PrecompileSetup.NEW_EXCEPTION_PROPOSAL)
                 precompileWasmModules(PrecompileSetup.STACK_SWITCHING_PROPOSAL)
+                precompileWasmModules(PrecompileSetup.STACKLESS_RECURSION)
                 precompileIsDone = true
             }
         }

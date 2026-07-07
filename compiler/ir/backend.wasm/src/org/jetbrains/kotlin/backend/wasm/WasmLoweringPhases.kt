@@ -149,7 +149,11 @@ val wasmLowerings: List<NamedCompilerPhase<WasmBackendContext, IrModuleFragment,
     ::RangeContainsLowering,
 
     ::WasmTailrecLowering,
+    // Both stackless-recursion passes must run before local declarations
+    // and function-reference locals are lowered: they inline local funs
+    // holding recursive calls and analyze free variables pre-closure-conversion.
     ::WasmDrfAccelerationLowering,
+    ::WasmStacklessMatcherLowering,
 
     ::EnumWhenLowering,
     ::EnumClassConstructorLowering,

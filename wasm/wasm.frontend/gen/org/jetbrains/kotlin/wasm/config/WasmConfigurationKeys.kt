@@ -96,6 +96,10 @@ object WasmConfigurationKeys {
     @JvmField
     val WASM_ENABLE_DRF_ACCELERATION = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_DRF_ACCELERATION")
 
+    // Compile virtual method hierarchies annotated with kotlin.internal.StacklessRecursion to stackless state machines with heap frames.
+    @JvmField
+    val WASM_ENABLE_STACKLESS_RECURSION = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_STACKLESS_RECURSION")
+
 }
 
 var CompilerConfiguration.wasmEnableArrayRangeChecks: Boolean
@@ -189,4 +193,8 @@ var CompilerConfiguration.wasmEnableTailCalls: Boolean
 var CompilerConfiguration.wasmEnableDrfAcceleration: Boolean
     get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_DRF_ACCELERATION)
     set(value) { put(WasmConfigurationKeys.WASM_ENABLE_DRF_ACCELERATION, value) }
+
+var CompilerConfiguration.wasmEnableStacklessRecursion: Boolean
+    get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION)
+    set(value) { put(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION, value) }
 

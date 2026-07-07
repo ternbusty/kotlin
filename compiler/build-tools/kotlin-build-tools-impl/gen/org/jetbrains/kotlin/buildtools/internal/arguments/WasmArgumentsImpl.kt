@@ -32,6 +32,7 @@ import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Co
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_ARRAY_RANGE_CHECKS
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_ASSERTS
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_DRF_ACCELERATION
+import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_STACKLESS_RECURSION
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_TAIL_CALLS
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_GENERATE_DWARF
@@ -153,6 +154,7 @@ internal class WasmArgumentsImpl(
     if (X_WASM_ENABLE_ARRAY_RANGE_CHECKS in this) { arguments.wasmEnableArrayRangeChecks = get(X_WASM_ENABLE_ARRAY_RANGE_CHECKS)}
     if (X_WASM_ENABLE_ASSERTS in this) { arguments.wasmEnableAsserts = get(X_WASM_ENABLE_ASSERTS)}
     if (X_WASM_ENABLE_DRF_ACCELERATION in this) { arguments.wasmEnableDrfAcceleration = get(X_WASM_ENABLE_DRF_ACCELERATION)}
+    if (X_WASM_ENABLE_STACKLESS_RECURSION in this) { arguments.wasmEnableStacklessRecursion = get(X_WASM_ENABLE_STACKLESS_RECURSION)}
     if (X_WASM_ENABLE_TAIL_CALLS in this) { arguments.wasmEnableTailCalls = get(X_WASM_ENABLE_TAIL_CALLS)}
     if (X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE in this) { arguments.wasmGenerateClosedWorldMultimodule = get(X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE)}
     if (X_WASM_GENERATE_DWARF in this) { arguments.generateDwarf = get(X_WASM_GENERATE_DWARF)}
@@ -185,6 +187,7 @@ internal class WasmArgumentsImpl(
     try { this[X_WASM_ENABLE_ARRAY_RANGE_CHECKS] = arguments.wasmEnableArrayRangeChecks } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_ENABLE_ASSERTS] = arguments.wasmEnableAsserts } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_ENABLE_DRF_ACCELERATION] = arguments.wasmEnableDrfAcceleration } catch (_: NoSuchMethodError) {  }
+    try { this[X_WASM_ENABLE_STACKLESS_RECURSION] = arguments.wasmEnableStacklessRecursion } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_ENABLE_TAIL_CALLS] = arguments.wasmEnableTailCalls } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE] = arguments.wasmGenerateClosedWorldMultimodule } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_GENERATE_DWARF] = arguments.generateDwarf } catch (_: NoSuchMethodError) {  }
@@ -215,6 +218,7 @@ internal class WasmArgumentsImpl(
     if (X_WASM_ENABLE_ARRAY_RANGE_CHECKS in this) { arguments.wasmEnableArrayRangeChecks = get(X_WASM_ENABLE_ARRAY_RANGE_CHECKS)}
     if (X_WASM_ENABLE_ASSERTS in this) { arguments.wasmEnableAsserts = get(X_WASM_ENABLE_ASSERTS)}
     if (X_WASM_ENABLE_DRF_ACCELERATION in this) { arguments.wasmEnableDrfAcceleration = get(X_WASM_ENABLE_DRF_ACCELERATION)}
+    if (X_WASM_ENABLE_STACKLESS_RECURSION in this) { arguments.wasmEnableStacklessRecursion = get(X_WASM_ENABLE_STACKLESS_RECURSION)}
     if (X_WASM_ENABLE_TAIL_CALLS in this) { arguments.wasmEnableTailCalls = get(X_WASM_ENABLE_TAIL_CALLS)}
     if (X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE in this) { arguments.wasmGenerateClosedWorldMultimodule = get(X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE)}
     if (X_WASM_GENERATE_DWARF in this) { arguments.generateDwarf = get(X_WASM_GENERATE_DWARF)}
@@ -290,6 +294,9 @@ internal class WasmArgumentsImpl(
 
     public val X_WASM_ENABLE_DRF_ACCELERATION: WasmArgument<Boolean> =
         WasmArgument("X_WASM_ENABLE_DRF_ACCELERATION")
+
+    public val X_WASM_ENABLE_STACKLESS_RECURSION: WasmArgument<Boolean> =
+        WasmArgument("X_WASM_ENABLE_STACKLESS_RECURSION")
 
     public val X_WASM_ENABLE_TAIL_CALLS: WasmArgument<Boolean> =
         WasmArgument("X_WASM_ENABLE_TAIL_CALLS")

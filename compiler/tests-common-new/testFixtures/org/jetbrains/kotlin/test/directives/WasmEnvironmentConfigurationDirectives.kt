@@ -38,6 +38,10 @@ object WasmEnvironmentConfigurationDirectives : SimpleDirectivesContainer() {
         description = "Compile DeepRecursiveFunction literals to stackless state machines with heap frames"
     )
 
+    val ENABLE_STACKLESS_RECURSION by directive(
+        description = "Compile annotated virtual method hierarchies to stackless state machines with heap frames"
+    )
+
     @OptIn(SensitiveDirectiveAPI::class)
     val WASM_IGNORE_FOR by valueDirective(
         description = """
