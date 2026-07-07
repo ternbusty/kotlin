@@ -115,6 +115,16 @@ sealed class K2WasmCompilerArguments : CommonJsAndWasmCompilerArguments() {
         }
 
     @Argument(
+        value = "-Xwasm-enable-drf-acceleration",
+        description = "Compile DeepRecursiveFunction literals to stackless state machines with heap frames.",
+    )
+    var wasmEnableDrfAcceleration: Boolean = false
+        set(value) {
+            checkFrozen()
+            field = value
+        }
+
+    @Argument(
         value = "-Xwasm-enable-tail-calls",
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect).",
     )

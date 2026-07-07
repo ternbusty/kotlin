@@ -150,6 +150,16 @@ public interface WasmCompilerLinkingArguments : WasmCompilerArguments,
         WasmCompilerLinkingArgument("X_WASM_ENABLE_ASSERTS", KotlinReleaseVersion(2, 1, 20))
 
     /**
+     * Compile DeepRecursiveFunction literals to stackless state machines with heap frames.
+     *
+     * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.
+     */
+    @JvmField
+    @ExperimentalCompilerArgument
+    public val X_WASM_ENABLE_DRF_ACCELERATION: WasmCompilerLinkingArgument<Boolean> =
+        WasmCompilerLinkingArgument("X_WASM_ENABLE_DRF_ACCELERATION", KotlinReleaseVersion(2, 4, 20))
+
+    /**
      * Emit WebAssembly tail call instructions (return_call / return_call_indirect).
      *
      * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.

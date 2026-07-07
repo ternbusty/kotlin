@@ -23,6 +23,7 @@ fun copyKotlinWasmCompilerArguments(from: KotlinWasmCompilerArguments, to: Kotli
     to.wasmDisableArrayRangeChecksSafeElimination = from.wasmDisableArrayRangeChecksSafeElimination
     to.wasmEnableArrayRangeChecks = from.wasmEnableArrayRangeChecks
     to.wasmEnableAsserts = from.wasmEnableAsserts
+    to.wasmEnableDrfAcceleration = from.wasmEnableDrfAcceleration
     to.wasmEnableTailCalls = from.wasmEnableTailCalls
     to.wasmGenerateClosedWorldMultimodule = from.wasmGenerateClosedWorldMultimodule
     to.wasmGenerateWat = from.wasmGenerateWat

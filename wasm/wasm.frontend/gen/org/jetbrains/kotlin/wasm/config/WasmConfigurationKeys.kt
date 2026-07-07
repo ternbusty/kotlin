@@ -92,6 +92,10 @@ object WasmConfigurationKeys {
     @JvmField
     val WASM_ENABLE_TAIL_CALLS = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_TAIL_CALLS")
 
+    // Compile DeepRecursiveFunction literals to stackless state machines with heap frames instead of the coroutine machinery.
+    @JvmField
+    val WASM_ENABLE_DRF_ACCELERATION = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_DRF_ACCELERATION")
+
 }
 
 var CompilerConfiguration.wasmEnableArrayRangeChecks: Boolean
@@ -181,4 +185,8 @@ var CompilerConfiguration.wasmTestBoxFunctionToExport: FqName?
 var CompilerConfiguration.wasmEnableTailCalls: Boolean
     get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS)
     set(value) { put(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS, value) }
+
+var CompilerConfiguration.wasmEnableDrfAcceleration: Boolean
+    get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_DRF_ACCELERATION)
+    set(value) { put(WasmConfigurationKeys.WASM_ENABLE_DRF_ACCELERATION, value) }
 
