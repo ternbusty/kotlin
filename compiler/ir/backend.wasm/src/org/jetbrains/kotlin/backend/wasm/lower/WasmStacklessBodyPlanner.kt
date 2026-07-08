@@ -5,72 +5,28 @@
 
 package org.jetbrains.kotlin.backend.wasm.lower
 
-import org.jetbrains.kotlin.backend.common.ModuleLoweringPass
-import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
-import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
-import org.jetbrains.kotlin.cli.common.messages.MessageCollector
-import org.jetbrains.kotlin.config.CommonConfigurationKeys
-import org.jetbrains.kotlin.config.MessageCollectorAccess
-import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
-import org.jetbrains.kotlin.descriptors.ClassKind
-import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
-import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
-import org.jetbrains.kotlin.ir.builders.*
-import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrBlockImpl
-import org.jetbrains.kotlin.ir.expressions.impl.IrCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrBranchImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrReturnImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrWhenImpl
-import org.jetbrains.kotlin.ir.expressions.impl.IrGetValueImpl
-import org.jetbrains.kotlin.ir.expressions.impl.IrInstanceInitializerCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrSetValueImpl
-import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
+import org.jetbrains.kotlin.ir.symbols.IrReturnTargetSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.*
-import org.jetbrains.kotlin.ir.visitors.IrTransformer
-import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
+import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
-/**
- * Defunctionalized CPS conversion for VIRTUAL mutual recursion over a closed
- * class hierarchy (CHA-based).
- *
- * Motivation: the stdlib regex matcher (kotlin.text.regex.AbstractSet.matches)
- * recurses through virtual dispatch over the compiled pattern's object graph.
- * Recursion depth is proportional to input length, causing stack overflow on
- * real-world inputs (KT-63689, KT-61542, KT-78089). The recursion is neither
- * tail-call-shaped nor TMC-shaped (post-call state restores and result
- * inspection), so neither return_call emission nor WasmTailModConsLowering
- * rescues it. This pass converts the whole hierarchy's overrides into a
- * single trampoline function with heap-allocated frames.
- *
- * Design (see .ai/gsoc-assets/virtual-cps-design.md):
- *  - CHA enumerates all overrides of the target base method in the module
- *    (sound under wasm whole-world compilation).
- *  - Each override body is compiled into a basic-block plan, splitting at
- *    virtual call sites of the target method:
- *      * calls in tail position    -> receiver/state swap, no frame
- *      * non-tail calls            -> heap frame capturing live locals
- *    Unsupported constructs bail out: that override keeps its native body
- *    and the trampoline invokes it as an ordinary virtual call (partial
- *    conversion is always semantics-preserving).
- *  - A single `run$virtualCps` function holds the flat state machine:
- *    while(true) + when(state), state = (override, block) pairs.
- *
- * PoC scoping: the target hierarchy is currently selected by
- * [isTargetBaseClass]; this becomes a compiler flag before upstreaming.
- */
 /**
  * Shared machinery for the stackless-recursion lowerings
  * ([WasmDrfAccelerationLowering], [WasmStacklessMatcherLowering]): a body
@@ -83,9 +39,10 @@ import org.jetbrains.kotlin.ir.visitors.acceptVoid
 
 /**
  * Native recursion budget before switching a subtree to the heap-frame
- * trampoline. Far below the wasm stack guard (~10-15K frames) even
- * with several frames per level and an already-deep caller stack, and
- * far above what everyday patterns reach.
+ * trampoline. Far below the wasm stack guard (~10-15K frames) even for
+ * recursion that burns several native frames per level and starts from
+ * an already-deep caller stack, and far above what everyday patterns
+ * reach.
  */
 internal const val STACKLESS_HYBRID_DEPTH_THRESHOLD = 512
 
@@ -95,7 +52,7 @@ internal const val STACKLESS_HYBRID_DEPTH_THRESHOLD = 512
  * Collapses trivial control flow the planner produces in numbers:
  * empty forwarder blocks are skipped and single-predecessor Goto
  * successors are fused into their predecessor. Fewer states means
- * fewer dispatch round-trips per matcher step.
+ * fewer dispatch round-trips per state-machine step.
  */
 internal fun simplifyPlan(plan: BodyPlan) {
     val resumeTargets = plan.blocks
@@ -146,17 +103,14 @@ internal fun simplifyPlan(plan: BodyPlan) {
             }
         }
         for (b in plan.blocks) {
-            if (b.terminator == null) continue
-            val t = b.terminator
-            if (t is Terminator.Goto) {
-                val c = t.target
-                if (c !== b && preds[c] == 1 && c !in resumeTargets && c !== plan.entry) {
-                    b.statements += c.statements
-                    b.terminator = c.terminator
-                    c.statements.clear()
-                    c.terminator = null
-                    changed = true
-                }
+            val t = b.terminator as? Terminator.Goto ?: continue
+            val c = t.target
+            if (c !== b && preds[c] == 1 && c !in resumeTargets && c !== plan.entry) {
+                b.statements += c.statements
+                b.terminator = c.terminator
+                c.statements.clear()
+                c.terminator = null
+                changed = true
             }
         }
     }
@@ -180,16 +134,16 @@ internal fun reachableBlocks(plan: BodyPlan): List<BlockPlan> {
 }
 
 
-// ================================================================ DeepRecursiveFunction acceleration
+// ================================================================ shared plan data model
 
 
-/** One override participating in a hierarchy plan (null class for synthetic roots). */
+/** One override participating in a hierarchy plan (null class when the function is not a class member). */
 internal class OverrideInfo(
     val irClass: IrClass?,
     val function: IrSimpleFunction,
 )
 
-internal class BlockPlan(val id: Int) {
+internal class BlockPlan {
     val statements = mutableListOf<IrStatement>()
     var terminator: Terminator? = null
 }
@@ -202,10 +156,10 @@ internal sealed class Terminator {
         val elseTarget: BlockPlan,
     ) : Terminator()
 
-    /** `return recv.matches(args)` — receiver/args swap, no frame. */
+    /** Target call in return position — state swap, no frame. */
     class TailCall(val call: IrCall) : Terminator()
 
-    /** `v = recv.matches(args)` — push frame, resume at [resume] with [resultSymbol] set. */
+    /** `v = <target call>` — push frame, resume at [resume] with [resultSymbol] set. */
     class SuspendCall(
         val call: IrCall,
         val resultSymbol: IrValueSymbol,
@@ -217,18 +171,19 @@ internal sealed class Terminator {
 
 internal class BodyPlan(
     val info: OverrideInfo,
-    val entry: BlockPlan,
     val blocks: List<BlockPlan>,
     /** Locals declared in the body, in declaration order (frame candidates). */
     val locals: List<IrVariable>,
-)
+) {
+    val entry: BlockPlan get() = blocks.first()
+}
 
 /** Thrown internally to abandon planning for one override (bail out to native). */
 internal class BailOut(val reason: String) : RuntimeException()
 internal class LoopFrame(val loop: IrLoop, val head: BlockPlan, val exit: BlockPlan)
 
 internal class ReturnableFrame(
-    val symbol: org.jetbrains.kotlin.ir.symbols.IrReturnTargetSymbol,
+    val symbol: IrReturnTargetSymbol,
     val join: BlockPlan,
     val resultTarget: IrValueSymbol? = null,
     /** `return <returnable block>` position: returns to the block are returns of the function. */
@@ -260,45 +215,24 @@ internal class WasmStacklessBodyPlanner(
     private val returnableStack = ArrayDeque<ReturnableFrame>()
     private val builtIns get() = context.irBuiltIns
 
-    private fun IrExpression.asDiscardedStatement(): IrStatement = this
+    /** Well-typed placeholder for return positions that are unreachable by construction. */
+    private fun unreachableDefault(): IrExpression =
+        IrConstImpl.defaultValueForType(UNDEFINED_OFFSET, UNDEFINED_OFFSET, func.returnType)
 
-    private fun IrExpression.asUnreachableDefault(): IrExpression = when (val rt = func.returnType) {
-        builtIns.intType -> IrConstImpl.int(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0)
-        builtIns.booleanType -> IrConstImpl.boolean(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, false)
-        builtIns.charType -> IrConstImpl.char(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, ' ')
-        builtIns.byteType -> IrConstImpl.byte(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0)
-        builtIns.shortType -> IrConstImpl.short(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0)
-        builtIns.longType -> IrConstImpl.long(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0)
-        builtIns.floatType -> IrConstImpl.float(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0.0f)
-        builtIns.doubleType -> IrConstImpl.double(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0.0)
-        else -> IrConstImpl.constNull(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt.makeNullable())
-    }
-
-    private fun newBlock(): BlockPlan = BlockPlan(blocks.size).also { blocks += it }
+    private fun newBlock(): BlockPlan = BlockPlan().also { blocks += it }
 
     fun plan(): BodyPlan? {
-        val body = bodyToPlan
         return try {
-            inlineLocalFunsWithTargetCalls(body)
+            inlineLocalFunsWithTargetCalls(bodyToPlan)
             val entry = newBlock()
-            val last = compileStatements(body.statements, entry)
+            val last = compileStatements(bodyToPlan.statements, entry)
             // Bodies whose every path returns or throws leave a block with
             // no terminator; the synthetic Ret is unreachable but must
             // still be well-typed for the function's return type.
             if (last.terminator == null) {
-                val rt = func.returnType
-                val zero: IrExpression = when (rt) {
-                    builtIns.intType -> IrConstImpl.int(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0)
-                    builtIns.booleanType -> IrConstImpl.boolean(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, false)
-                    builtIns.charType -> IrConstImpl.char(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, ' ')
-                    builtIns.longType -> IrConstImpl.long(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0)
-                    builtIns.floatType -> IrConstImpl.float(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0.0f)
-                    builtIns.doubleType -> IrConstImpl.double(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt, 0.0)
-                    else -> IrConstImpl.constNull(UNDEFINED_OFFSET, UNDEFINED_OFFSET, rt.makeNullable())
-                }
-                last.terminator = Terminator.Ret(zero)
+                last.terminator = Terminator.Ret(unreachableDefault())
             }
-            BodyPlan(OverrideInfo(func.parent as? IrClass, func), blocks.first(), blocks, locals)
+            BodyPlan(OverrideInfo(func.parent as? IrClass, func), blocks, locals)
         } catch (b: BailOut) {
             lastBailReason = b.reason
             null
@@ -316,7 +250,8 @@ internal class WasmStacklessBodyPlanner(
         body.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
             override fun visitSimpleFunction(declaration: IrSimpleFunction) {
-                if (hasTargetCallInside(declaration)) localFuns += declaration
+                // Unmemoized scan: bodies still change while this pass inlines.
+                if (scanForTargetCall(declaration)) localFuns += declaration
             }
         })
         if (localFuns.isEmpty()) return
@@ -336,9 +271,9 @@ internal class WasmStacklessBodyPlanner(
             })
             if (returns != 1) throw BailOut("local fun with multiple returns holds target call")
 
-            body.transform(object : IrTransformer<Nothing?>() {
-                override fun visitCall(expression: IrCall, data: Nothing?): IrElement {
-                    expression.transformChildren(this, data)
+            body.transformChildrenVoid(object : IrElementTransformerVoid() {
+                override fun visitCall(expression: IrCall): IrExpression {
+                    expression.transformChildrenVoid(this)
                     if (expression.symbol != lf.symbol) return expression
                     val copied = lfBody.deepCopyWithSymbols(lf)
                     val stmts = copied.statements.toMutableList()
@@ -348,16 +283,15 @@ internal class WasmStacklessBodyPlanner(
                         stmts + ret.value,
                     )
                 }
-            }, null)
-            // Drop the now-unused declaration.
-            body.statements.removeAll { it === lf }
-            body.transform(object : IrTransformer<Nothing?>() {
-                override fun visitBlock(expression: IrBlock, data: Nothing?): IrExpression {
-                    expression.transformChildren(this, data)
+
+                // Drop the now-unused declaration from nested blocks.
+                override fun visitBlock(expression: IrBlock): IrExpression {
+                    expression.transformChildrenVoid(this)
                     expression.statements.removeAll { it === lf }
                     return expression
                 }
-            }, null)
+            })
+            body.statements.removeAll { it === lf }
         }
     }
 
@@ -417,7 +351,7 @@ internal class WasmStacklessBodyPlanner(
                         cur = compileAssignmentOf(frame.resultTarget, stmt.value, current)
                     } else {
                         if (containsTargetCall(stmt.value)) throw BailOut("target call in returnable-block return value")
-                        current.statements += stmt.value.asDiscardedStatement()
+                        current.statements += stmt.value
                         cur = current
                     }
                     cur.terminator = Terminator.Goto(frame.join)
@@ -447,7 +381,7 @@ internal class WasmStacklessBodyPlanner(
                             }
                             val end = compileStatement(pushed, current)
                             // A return-when with no else falls through: treat as unreachable end.
-                            if (end.terminator == null) end.terminator = Terminator.Ret(value.asUnreachableDefault())
+                            if (end.terminator == null) end.terminator = Terminator.Ret(unreachableDefault())
                             return end
                         }
                         is IrBlock -> {
@@ -643,7 +577,7 @@ internal class WasmStacklessBodyPlanner(
         var condBlock = current
         for (branch in whenExpr.branches) {
             if (needsSplit(branch.condition)) throw BailOut("target call or return in when condition")
-            val isElse = branch.condition is IrConst && (branch.condition as IrConst).value == true
+            val isElse = isElseBranch(branch)
             val bodyBlock = newBlock()
             if (isElse) {
                 condBlock.terminator = Terminator.Goto(bodyBlock)
@@ -652,20 +586,16 @@ internal class WasmStacklessBodyPlanner(
                 condBlock.terminator = Terminator.CondGoto(branch.condition, bodyBlock, next)
                 condBlock = next
             }
-            val bodyEnd = compileStatement(branch.result.asStatement(), bodyBlock)
+            val bodyEnd = compileStatement(branch.result, bodyBlock)
             if (bodyEnd.terminator == null) bodyEnd.terminator = Terminator.Goto(join)
             if (isElse) {
-                return joinOrContinue(join)
+                return join
             }
         }
         // No else branch: fall through from the last condition block.
         condBlock.terminator = Terminator.Goto(join)
-        return joinOrContinue(join)
+        return join
     }
-
-    private fun joinOrContinue(join: BlockPlan): BlockPlan = join
-
-    private fun IrExpression.asStatement(): IrStatement = this
 
     private fun compileWhile(loop: IrWhileLoop, current: BlockPlan): BlockPlan {
         if (needsSplit(loop.condition)) throw BailOut("target call or return in loop condition")
@@ -703,66 +633,37 @@ internal class WasmStacklessBodyPlanner(
 
     /** Any statement holding a target call, an outer return, or a jump to
      *  a loop that is being split must itself be compiled into block
-     *  structure, so those transfers route through the state machine. */
-    private fun needsSplit(element: IrElement): Boolean =
-        containsTargetCall(element) || containsOuterReturn(element) ||
-                containsJumpToSplitLoop(element) || containsReturnToSplitBlock(element)
-
-    private fun containsReturnToSplitBlock(element: IrElement): Boolean {
-        if (returnableStack.isEmpty()) return false
-        val targets = returnableStack.mapTo(mutableSetOf<Any>()) { it.symbol }
+     *  structure, so those transfers route through the state machine.
+     *  All conditions are checked in a single traversal; nested functions
+     *  are opaque except for the target calls they hold (they are analyzed
+     *  separately and cannot be split here). */
+    private fun needsSplit(element: IrElement): Boolean {
         var found = false
         element.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
                 if (!found) element.acceptChildrenVoid(this)
             }
 
-            override fun visitFunction(declaration: IrFunction) {}
+            override fun visitFunction(declaration: IrFunction) {
+                if (hasTargetCallInside(declaration)) found = true
+            }
+
+            override fun visitCall(expression: IrCall) {
+                if (isTarget(expression)) found = true else expression.acceptChildrenVoid(this)
+            }
 
             override fun visitReturn(expression: IrReturn) {
-                if (expression.returnTargetSymbol in targets) {
+                if (expression.returnTargetSymbol == func.symbol ||
+                    returnableStack.any { it.symbol == expression.returnTargetSymbol }
+                ) {
                     found = true
-                    return
+                } else {
+                    expression.acceptChildrenVoid(this)
                 }
-                expression.acceptChildrenVoid(this)
             }
-        })
-        return found
-    }
-
-    private fun containsJumpToSplitLoop(element: IrElement): Boolean {
-        if (loopStack.isEmpty()) return false
-        val splitLoops = loopStack.mapTo(mutableSetOf()) { it.loop }
-        var found = false
-        element.acceptVoid(object : IrVisitorVoid() {
-            override fun visitElement(element: IrElement) {
-                if (!found) element.acceptChildrenVoid(this)
-            }
-
-            override fun visitFunction(declaration: IrFunction) {}
 
             override fun visitBreakContinue(jump: IrBreakContinue) {
-                if (jump.loop in splitLoops) found = true
-            }
-        })
-        return found
-    }
-
-    private fun containsOuterReturn(element: IrElement): Boolean {
-        var found = false
-        element.acceptVoid(object : IrVisitorVoid() {
-            override fun visitElement(element: IrElement) {
-                if (!found) element.acceptChildrenVoid(this)
-            }
-
-            override fun visitFunction(declaration: IrFunction) {}
-
-            override fun visitReturn(expression: IrReturn) {
-                if (expression.returnTargetSymbol == func.symbol) {
-                    found = true
-                    return
-                }
-                expression.acceptChildrenVoid(this)
+                if (loopStack.any { it.loop == jump.loop }) found = true
             }
         })
         return found
@@ -782,17 +683,24 @@ internal class WasmStacklessBodyPlanner(
             }
 
             override fun visitCall(expression: IrCall) {
-                if (isTarget(expression)) {
-                    found = true
-                    return
-                }
-                expression.acceptChildrenVoid(this)
+                if (isTarget(expression)) found = true else expression.acceptChildrenVoid(this)
             }
         })
         return found
     }
 
-    private fun hasTargetCallInside(declaration: IrFunction): Boolean {
+    private val localFunContainsTarget = HashMap<IrFunction, Boolean>()
+
+    /**
+     * Memoized: queried once per enclosing container level while compiling
+     * the surrounding statements, and local-fun bodies no longer change
+     * after [inlineLocalFunsWithTargetCalls] has run (which is why that
+     * pass scans without the cache).
+     */
+    private fun hasTargetCallInside(declaration: IrFunction): Boolean =
+        localFunContainsTarget.getOrPut(declaration) { scanForTargetCall(declaration) }
+
+    private fun scanForTargetCall(declaration: IrFunction): Boolean {
         var found = false
         declaration.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
@@ -807,6 +715,4 @@ internal class WasmStacklessBodyPlanner(
         return found
     }
 }
-
-// ================================================================ hierarchy lowering
 
