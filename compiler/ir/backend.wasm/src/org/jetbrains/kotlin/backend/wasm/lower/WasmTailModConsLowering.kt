@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.backend.wasm.utils.StronglyConnectedComponents
 import org.jetbrains.kotlin.backend.wasm.utils.hasTailModConsAnnotation
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.backend.wasm.WasmBackendErrors
+import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrElement
@@ -20,20 +21,31 @@ import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
+import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.expressions.impl.IrBlockImpl
+import org.jetbrains.kotlin.ir.expressions.impl.IrBreakImpl
+import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
+import org.jetbrains.kotlin.ir.expressions.impl.IrSetValueImpl
+import org.jetbrains.kotlin.ir.expressions.impl.IrInstanceInitializerCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrReturnImpl
+import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.makeNullable
+import org.jetbrains.kotlin.ir.util.constructors
+import org.jetbrains.kotlin.ir.util.createThisReceiverParameter
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
+import org.jetbrains.kotlin.ir.util.defaultValueForType
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.util.properties
 import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.IrTransformer
+import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.IrVisitor
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
@@ -102,15 +114,20 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
         val transformed = mutableSetOf<IrSimpleFunction>()
 
-        // DPS-loop runs first: for functions matching the iterative-rec shape where
-        // post-effects reference neither the pre-loop variables nor the recursive result, use
-        // destination-passing style with mutable struct fields inside a while(true) loop.
-        // The loop allocates a cell, fills the previous hole (dst.field = cell),
-        // advances dst, and re-evaluates the branch condition.  At the base case the
-        // deferred post-effects are replayed `depth` times in a simple loop.
-        // No separate DPS function or return_call, so V8 loop optimizations apply.
+        // DPS-loop and iterative-rec consume the same matched shape
+        // (`val r = when { branch(f(args)) }; return expr`, which
+        // normalizeReturnWhen would break by distributing returns into
+        // branches), so the matcher runs once per function. DPS-loop is
+        // tried first: where post-effects reference neither the pre-loop
+        // variables nor the recursive result, the recursion becomes
+        // destination-passing style with mutable struct fields inside a
+        // while(true) loop, with the deferred post-effects replayed at the
+        // base case. No separate DPS function or return_call, so V8 loop
+        // optimizations apply. Iterative-rec is the explicit-frame-stack
+        // fallback for the rest.
         for (f in allFunctions) {
-            if (tryDpsLoopTransform(f)) {
+            val m = matchIterativeRecShape(f) ?: continue
+            if (tryDpsLoopTransform(f, m) || tryIterativeRecTransform(f, irFile, m)) {
                 transformed += f
             }
         }
@@ -511,8 +528,11 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     // -------------------------------------------------------------- DPS-loop (no return_call)
 
-    private fun tryDpsLoopTransform(func: IrSimpleFunction): Boolean {
-        val m = matchIterativeRecShape(func) ?: return false
+    private fun tryDpsLoopTransform(func: IrSimpleFunction, m: IterativeRecMatch): Boolean {
+        // DPS-loop returns the head cell directly, so it cannot replay a wrapped
+        // return; those shapes fall through to iterative-rec.
+        val retVal = m.returnStmt.value
+        if (retVal !is IrGetValue || retVal.symbol != m.resultVar.symbol) return false
         if (m.recPostEffects.isEmpty()) return false
         if (referencesSymbol(m.recPostEffects, m.recCallVar.symbol)) return false
         if (m.preVars.any { referencesSymbol(m.recPostEffects, it.symbol) }) return false
@@ -724,12 +744,16 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     private data class IterativeRecMatch(
         val earlyReturnWhens: List<IrWhen>,
         val preVars: List<IrVariable>,
+        val resultVar: IrVariable,
         val recursiveBranchCondition: IrExpression,
         val recPreEffects: List<IrStatement>,
         val recCallVar: IrVariable,
         val recPostEffects: List<IrStatement>,
         val recFinalExpr: IrExpression,
         val baseBranches: List<IrBranch>,
+        val returnStmt: IrReturn,
+        /** Pre-loop variables the unwind pass must restore per level (referenced by the post region). */
+        val savedVars: List<IrVariable>,
     )
 
     private fun countSelfCalls(func: IrSimpleFunction): Int {
@@ -757,12 +781,11 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val returnStmt = stmts.last() as? IrReturn ?: return null
         if (returnStmt.returnTargetSymbol != func.symbol) return null
 
-        // The result variable must directly precede the trailing return, which must read it.
+        // The result variable must directly precede the trailing return; the return
+        // itself may read it directly or wrap it (iterative-rec replays the wrap).
         val resultVarIdx = stmts.size - 2
         val resultVar = stmts[resultVarIdx] as? IrVariable ?: return null
         val whenExpr = resultVar.initializer as? IrWhen ?: return null
-        val retVal = returnStmt.value
-        if (retVal !is IrGetValue || retVal.symbol != resultVar.symbol) return null
 
         var recBranchIdx = -1
         var matchedRecCallVar: IrVariable? = null
@@ -815,16 +838,280 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
+        val postRegion = matchedPostEffects!! + listOf<IrStatement>(matchedRecFinalExpr, returnStmt)
+        val savedVars = preVars.filter { referencesSymbol(postRegion, it.symbol) }
+
         return IterativeRecMatch(
             earlyReturnWhens = earlyReturnWhens,
             preVars = preVars,
+            resultVar = resultVar,
             recursiveBranchCondition = whenExpr.branches[recBranchIdx].condition,
             recPreEffects = matchedPreEffects!!,
             recCallVar = matchedRecCallVar!!,
-            recPostEffects = matchedPostEffects!!,
+            recPostEffects = matchedPostEffects,
             recFinalExpr = matchedRecFinalExpr,
             baseBranches = baseBranches,
+            returnStmt = returnStmt,
+            savedVars = savedVars,
         )
+    }
+
+    private fun tryIterativeRecTransform(func: IrSimpleFunction, irFile: IrFile, m: IterativeRecMatch): Boolean {
+        // Post-effects run in the unwind pass before the recursive result is
+        // rebound; a reference to it would survive as a dangling symbol
+        // (recFinalExpr is the only reader remapped to the result variable).
+        if (referencesSymbol(m.recPostEffects, m.recCallVar.symbol)) return false
+        // The unwind pass replays the post region against the final parameter
+        // values; per-frame parameter values are not saved. Reject shapes
+        // whose post region reads a parameter when the recursion rebinds one.
+        val recCall = m.recCallVar.initializer as IrCall
+        val sameParams = func.parameters.indices.all { i ->
+            val arg = recCall.arguments[i]
+            arg is IrGetValue && arg.symbol == func.parameters[i].symbol
+        }
+        if (!sameParams) {
+            val postRegion = m.recPostEffects + listOf<IrStatement>(m.recFinalExpr, m.returnStmt.value)
+            if (func.parameters.any { p -> referencesSymbol(postRegion, p.symbol) }) return false
+        }
+        context.irFactory.stageController.restrictTo(func) {
+            doIterativeRecTransform(func, irFile, m)
+        }
+        return true
+    }
+
+    /**
+     * Rewrites the matched recursion as two loops. The forward loop
+     * evaluates the original branches once per level, in branch order:
+     * the recursive branch descends (frame push, parameter rebind), any
+     * other branch binds the result, applies the return wrap, and breaks.
+     * Early returns bind the result and break without the wrap, as in the
+     * original. The unwind loop then replays the post region once per
+     * saved level. Nothing is evaluated more often than the recursion
+     * it replaces.
+     */
+    private fun doIterativeRecTransform(func: IrSimpleFunction, irFile: IrFile, m: IterativeRecMatch) {
+        val body = func.body as IrBlockBody
+
+        val builder = context.createIrBuilder(func.symbol, body.startOffset, body.endOffset)
+
+        val recCall = m.recCallVar.initializer as IrCall
+        val sameParams = func.parameters.indices.all { i ->
+            val arg = recCall.arguments[i]
+            arg is IrGetValue && arg.symbol == func.parameters[i].symbol
+        }
+
+        val frameInfo = if (m.savedVars.isNotEmpty()) buildSavedFrameClass(irFile, func, m.savedVars) else null
+
+        val newBody = builder.irBlockBody {
+            val paramVars = if (!sameParams) {
+                func.parameters.map { p ->
+                    createTmpVariable(irGet(p), nameHint = "\$${p.name}", isMutable = true)
+                }
+            } else null
+            val paramMap: Map<IrValueSymbol, IrValueSymbol> = if (paramVars != null) {
+                func.parameters.withIndex().associate { iv -> iv.value.symbol to paramVars[iv.index].symbol }
+            } else emptyMap()
+
+            val depthVar = createTmpVariable(irInt(0), nameHint = "\$depth", isMutable = true)
+
+            val frameStackVar: IrVariable? = frameInfo?.let { fi ->
+                createTmpVariable(
+                    irNull(fi.cls.defaultTypeNullable()),
+                    nameHint = "\$frames",
+                    isMutable = true,
+                    irType = fi.cls.defaultTypeNullable(),
+                )
+            }
+
+            val resultVar = createTmpVariable(
+                IrConstImpl.defaultValueForType(UNDEFINED_OFFSET, UNDEFINED_OFFSET, func.returnType),
+                nameHint = "\$result",
+                isMutable = true,
+                irType = func.returnType,
+            )
+
+            // Remapped once in place here; every wrap emission below copies from it.
+            remapSymbols(m.returnStmt, paramMap + mapOf(m.resultVar.symbol to resultVar.symbol))
+
+            // Applies the return statement's wrap (anything beyond a plain
+            // return of the result variable) to the result variable.
+            fun IrStatementsBuilder<*>.emitReturnWrap(extraRemap: Map<IrValueSymbol, IrValueSymbol>) {
+                val wrap = m.returnStmt.value
+                if (wrap is IrGetValue && wrap.symbol == resultVar.symbol) return
+                +irSet(resultVar.symbol, wrap.copyRemapped(extraRemap))
+            }
+
+            +irWhile().apply {
+                condition = irTrue()
+                this.body = irBlock {
+                    for (w in m.earlyReturnWhens) {
+                        remapSymbols(w, paramMap)
+                        transformReturnsToResultBreaks(w, func.symbol, resultVar, this@apply)
+                        +w
+                    }
+                    for (v in m.preVars) {
+                        remapSymbols(v, paramMap)
+                        +v
+                    }
+
+                    // The original `when`, in branch order: the recursive
+                    // branch becomes the level descent, every other branch
+                    // binds the result and leaves the loop.
+                    val whenExpr = m.resultVar.initializer as IrWhen
+                    +irWhen(context.irBuiltIns.unitType, whenExpr.branches.map { branch ->
+                        val isRec = branch.condition === m.recursiveBranchCondition
+                        remapSymbols(branch, paramMap)
+                        val branchBody = if (isRec) {
+                            irBlock {
+                                for (effect in m.recPreEffects) +effect
+
+                                if (frameInfo != null && frameStackVar != null) {
+                                    +irSet(
+                                        frameStackVar.symbol,
+                                        irNewFrame(frameInfo, m.savedVars.map { irGet(it) }, irGet(frameStackVar)),
+                                    )
+                                }
+
+                                if (paramVars != null) {
+                                    val argTmps = func.parameters.mapIndexed { i, _ ->
+                                        createTmpVariable(recCall.arguments[i]!!, nameHint = "next$i")
+                                    }
+                                    for (tmpIv in argTmps.withIndex()) {
+                                        +irSet(paramVars[tmpIv.index].symbol, irGet(tmpIv.value))
+                                    }
+                                }
+
+                                +irSet(depthVar.symbol, irCallOp(context.irBuiltIns.intPlusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(1)))
+                            }
+                        } else {
+                            irBlock {
+                                +irSet(resultVar.symbol, branch.result)
+                                emitReturnWrap(emptyMap())
+                                +irBreak(this@apply)
+                            }
+                        }
+                        irBranch(branch.condition, branchBody)
+                    })
+                }
+            }
+
+            +irWhile().apply {
+                condition = irNotEquals(irGet(depthVar), irInt(0))
+                this.body = irBlock {
+                    +irSet(depthVar.symbol, irCallOp(context.irBuiltIns.intPlusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(-1)))
+
+                    val savedVarMap = mutableMapOf<IrValueSymbol, IrValueSymbol>()
+                    if (frameInfo != null && frameStackVar != null) {
+                        val frameTmp = createTmpVariable(
+                            irImplicitCast(irGet(frameStackVar), frameInfo.cls.symbol.defaultType),
+                            nameHint = "\$frame",
+                        )
+                        for (svIv in m.savedVars.withIndex()) {
+                            val sv = svIv.value
+                            val restoredVarCopy = sv.deepCopyWithSymbols()
+                            restoredVarCopy.initializer = irGetField(irGet(frameTmp), frameInfo.fields[svIv.index])
+                            +restoredVarCopy
+                            savedVarMap[sv.symbol] = restoredVarCopy.symbol
+                        }
+                        +irSet(frameStackVar.symbol, irGetField(irGet(frameTmp), frameInfo.prevField))
+                    }
+
+                    val backwardRemap = savedVarMap + paramMap
+                    for (effect in m.recPostEffects) {
+                        remapSymbols(effect, backwardRemap)
+                        +effect
+                    }
+
+                    +irSet(
+                        resultVar.symbol,
+                        m.recFinalExpr.copyRemapped(savedVarMap + mapOf(m.recCallVar.symbol to resultVar.symbol) + paramMap),
+                    )
+
+                    emitReturnWrap(savedVarMap)
+                }
+            }
+
+            +irReturn(irGet(resultVar))
+        }
+
+        body.statements.clear()
+        body.statements += newBody.statements
+        body.patchDeclarationParents(func)
+    }
+
+    private data class SavedFrameInfo(
+        val cls: IrClass,
+        val fields: List<IrField>,
+        val prevField: IrField,
+        val ctorSymbol: IrConstructorSymbol,
+    )
+
+    /** Distinguishes frame classes when several same-named functions in one file transform. */
+    private var frameClassIndex = 0
+
+    private fun buildSavedFrameClass(
+        irFile: IrFile,
+        func: IrSimpleFunction,
+        savedVars: List<IrVariable>,
+    ): SavedFrameInfo {
+        val cls = context.irFactory.buildClass {
+            name = Name.identifier("\$TmcFrame_${func.name}_${frameClassIndex++}")
+            visibility = DescriptorVisibilities.PRIVATE
+            modality = Modality.FINAL
+            kind = ClassKind.CLASS
+        }.apply {
+            parent = irFile
+            irFile.declarations += this
+            createThisReceiverParameter()
+            superTypes = listOf(context.irBuiltIns.anyType)
+        }
+
+        val fields = savedVars.map { sv ->
+            cls.addField {
+                name = sv.name
+                type = sv.type
+                visibility = DescriptorVisibilities.PUBLIC
+                isFinal = true
+            }
+        }
+
+        val prevName = Name.identifier("\$prev")
+        val prevField = cls.addField {
+            name = prevName
+            type = cls.defaultTypeNullable()
+            visibility = DescriptorVisibilities.PUBLIC
+            isFinal = true
+        }
+
+        val ctor = cls.addConstructor {
+            isPrimary = true
+        }.apply {
+            val params = savedVars.map { sv -> addValueParameter(sv.name, sv.type) }
+            val prevParam = addValueParameter(prevName, cls.defaultTypeNullable())
+            body = context.createIrBuilder(symbol, UNDEFINED_OFFSET, UNDEFINED_OFFSET).irBlockBody {
+                +irDelegatingConstructorCall(context.irBuiltIns.anyClass.owner.constructors.single())
+                +IrInstanceInitializerCallImpl(
+                    UNDEFINED_OFFSET, UNDEFINED_OFFSET,
+                    cls.symbol, context.irBuiltIns.unitType
+                )
+                for (fieldIv in fields.withIndex()) {
+                    +irSetField(irGet(cls.thisReceiver!!), fieldIv.value, irGet(params[fieldIv.index]))
+                }
+                +irSetField(irGet(cls.thisReceiver!!), prevField, irGet(prevParam))
+            }
+        }
+
+        return SavedFrameInfo(cls, fields, prevField, ctor.symbol)
+    }
+
+    /** Owns the frame ctor argument layout: saved fields in order, then the previous frame. */
+    private fun IrBuilderWithScope.irNewFrame(
+        info: SavedFrameInfo,
+        savedValues: List<IrExpression>,
+        prev: IrExpression,
+    ): IrExpression = irCallConstructor(info.ctorSymbol, emptyList()).apply {
+        for (i in savedValues.indices) arguments[i] = savedValues[i]
+        arguments[savedValues.size] = prev
     }
 
     private fun remapSymbols(element: IrElement, mapping: Map<IrValueSymbol, IrValueSymbol>) {
@@ -836,6 +1123,31 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val copy = deepCopyWithSymbols()
         if (mapping.isEmpty()) return copy
         return copy.transform(ValueRemapper(mapping), null) as T
+    }
+
+    /** `return v` targeting [funcSymbol] becomes `{ result = v; break }`. */
+    private fun transformReturnsToResultBreaks(
+        element: IrElement,
+        funcSymbol: IrSimpleFunctionSymbol,
+        resultVar: IrVariable,
+        loop: IrLoop,
+    ) {
+        element.transform(object : IrElementTransformerVoid() {
+            override fun visitReturn(expression: IrReturn): IrExpression {
+                expression.transformChildrenVoid(this)
+                if (expression.returnTargetSymbol != funcSymbol) return expression
+                return IrBlockImpl(
+                    expression.startOffset, expression.endOffset, context.irBuiltIns.nothingType, null,
+                    listOf(
+                        IrSetValueImpl(
+                            expression.startOffset, expression.endOffset, context.irBuiltIns.unitType,
+                            resultVar.symbol, expression.value, null,
+                        ),
+                        IrBreakImpl(expression.startOffset, expression.endOffset, context.irBuiltIns.nothingType, loop),
+                    ),
+                )
+            }
+        }, null)
     }
 
 }
