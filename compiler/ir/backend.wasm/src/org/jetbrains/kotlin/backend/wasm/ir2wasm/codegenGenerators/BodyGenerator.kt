@@ -51,12 +51,8 @@ class BodyGenerator(
 
     private val unitGetInstance by lazy { backendContext.findUnitGetInstanceFunction() }
 
-    private val globalTailCallsEnabled: Boolean by lazy {
-        backendContext.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS) == true
-    }
-
     /**
-     * Returns true if [call] should be emitted as a tail call (`return_call` or `return_call_ref`).
+     * Returns true if [call] should be emitted as a tail call.
      *
      * [WasmTailCallLowering] marks structurally tail-positioned calls with
      * [WASM_TAIL_CALL] origin. This method applies additional Wasm-level eligibility
@@ -67,32 +63,12 @@ class BodyGenerator(
      *   a tail-call frame swap.
      * - The Wasm result type of the caller must match that of the callee, because
      *   `return_call` requires the callee's result type to equal the caller's.
-     *
-     * When [WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS] is explicitly set to true,
-     * all calls passing the filters above are emitted as tail calls. Otherwise,
-     * emission is selective to avoid disrupting V8 inlining of small hot callees
-     * (`return_call` prevents V8 from inlining the callee into the caller):
-     * only self-recursive calls, TMC DPS helper calls, and virtual/interface
-     * dispatch are allowed. [isVirtualDispatch] should be true at `return_call_ref`
-     * sites; V8 never inlines through indirect calls, so `return_call_ref` has no
-     * inlining penalty.
      */
-    private fun isEligibleForTailCall(
-        call: IrFunctionAccessExpression,
-        callee: IrFunction,
-        isVirtualDispatch: Boolean = false,
-    ): Boolean {
+    private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
         if (call !is IrCall) return false
         if (call.origin !== WASM_TAIL_CALL) return false
         if (callee is IrConstructor) return false
         val caller = functionContext.irFunction ?: return false
-
-        if (!globalTailCallsEnabled && !isVirtualDispatch) {
-            val isSelfRecursive = callee.symbol == caller.symbol
-            val isTmcDps = caller.name.asString().endsWith("\$tmcDps")
-            if (!isSelfRecursive && !isTmcDps) return false
-        }
-
         val callerResultType = wasmModuleTypeTransformer.transformResultType(caller.returnType)
         val calleeResultType = wasmModuleTypeTransformer.transformResultType(callee.returnType)
         return callerResultType == calleeResultType
@@ -901,8 +877,7 @@ class BodyGenerator(
 
         val function: IrFunction = callFunction.realOverrideTarget
         val isSuperCall = call is IrCall && call.superQualifierSymbol != null
-        val isVirtualDispatch = function is IrSimpleFunction && function.isOverridable && !isSuperCall
-        val isTail = isEligibleForTailCall(call, function, isVirtualDispatch)
+        val isTail = isEligibleForTailCall(call, function)
         if (function is IrSimpleFunction && function.isOverridable && !isSuperCall) {
             val originalClass = callFunction.parentAsClass
             val realOverrideTargetClass = function.parentAsClass

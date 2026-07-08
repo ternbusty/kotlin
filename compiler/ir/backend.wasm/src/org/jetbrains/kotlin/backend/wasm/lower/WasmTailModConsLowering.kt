@@ -6,37 +6,32 @@
 package org.jetbrains.kotlin.backend.wasm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
+import org.jetbrains.kotlin.backend.common.lower.AbstractVariableRemapper
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
+import org.jetbrains.kotlin.backend.wasm.utils.StronglyConnectedComponents
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
 import org.jetbrains.kotlin.config.MessageCollectorAccess
-import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrBlockImpl
-import org.jetbrains.kotlin.ir.expressions.impl.IrBreakImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrGetValueImpl
-import org.jetbrains.kotlin.ir.expressions.impl.IrInstanceInitializerCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrReturnImpl
-import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.makeNullable
-import org.jetbrains.kotlin.ir.types.typeWith
-import org.jetbrains.kotlin.ir.util.createThisReceiverParameter
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
@@ -47,6 +42,7 @@ import org.jetbrains.kotlin.ir.visitors.IrTransformer
 import org.jetbrains.kotlin.ir.visitors.IrVisitor
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
+import org.jetbrains.kotlin.ir.visitors.acceptVoid
 
 /**
  * Tail Modulo Cons (TMC) lowering for Kotlin/Wasm.
@@ -74,15 +70,18 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
  * flow, saved variables, and via-variable patterns without rebuilding the body
  * from scratch.
  *
- * Functions not eligible for DPS (e.g. those with post-effects after the
- * recursive call, or SCCs of size >= 3) fall through to an iterative rewrite
- * using a forward/backward loop with an explicit stack.
+ * Functions not eligible for DPS (e.g. those whose post-effects reference the
+ * recursive result, or SCCs of size >= 3) are left untouched.
+ *
+ * Candidate detection is file-local, and the pairwise rewrite requires both
+ * members in the same declaration container; mutual recursion across files or
+ * containers is reported as a candidate but not transformed.
  */
 internal class WasmTailModConsLowering(private val context: WasmBackendContext) : FileLoweringPass {
 
-    private val messageCollector: MessageCollector?
-        @OptIn(MessageCollectorAccess::class)
-        get() = context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
+    @OptIn(MessageCollectorAccess::class)
+    private val messageCollector: MessageCollector? =
+        context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
 
     private val enabled = context.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TMC) == true
 
@@ -116,9 +115,14 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
+        // Only calls to functions of this file can form transformable cycles, so
+        // gate normalization and site collection on file-local callees to avoid
+        // churning IR that can never become a candidate.
+        val fileFunctions = allFunctions.toHashSet()
+
         for (f in allFunctions) {
             if (f in transformed) continue
-            if (hasReturnWhenWithCtorCall(f)) {
+            if (hasReturnWhenWithCtorCall(f, fileFunctions)) {
                 normalizeReturnWhen(f)
             }
         }
@@ -126,7 +130,8 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         // Collect TMC sites per function and build edges (caller -> callee) within the file.
         val sitesByFunc = mutableMapOf<IrSimpleFunction, List<TmcSite>>()
         for (f in allFunctions) {
-            val sites = collectTmcSites(f)
+            if (f in transformed) continue
+            val sites = collectTmcSites(f).filter { it.recursiveCall.symbol.owner in fileFunctions }
             if (sites.isNotEmpty()) sitesByFunc[f] = sites
         }
 
@@ -239,11 +244,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                 if (expression !== site.returnExpr) return super.visitReturn(expression, data)
                 return builder.irBlock {
                     val head = createTmpVariable(
-                        builder.irCallConstructor(site.ctorCall.symbol, emptyList()).apply {
-                            for (i in 0 until site.ctorCall.arguments.size) {
-                                arguments[i] = if (i == site.recursiveArgIndex) builder.irNull() else site.ctorCall.arguments[i]
-                            }
-                        },
+                        builder.irCtorWithNullHole(site.ctorCall, site.recursiveArgIndex),
                         nameHint = "tmcHead",
                     )
                     +builder.irCall(fDps.symbol).apply {
@@ -276,7 +277,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val paramMapping: Map<IrValueSymbol, IrValueSymbol> = original.parameters.withIndex().associate { iv ->
             iv.value.symbol to dps.parameters[iv.index].symbol
         }
-        if (paramMapping.isNotEmpty()) remapSymbols(bodyCopy, paramMapping)
+        remapSymbols(bodyCopy, paramMapping)
 
         val viaVarCalls = mutableMapOf<IrValueSymbol, IrCall>()
 
@@ -305,11 +306,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                     if (recCall != null) {
                         return builder.irBlock {
                             val cell = createTmpVariable(
-                                builder.irCallConstructor(ctorSymbol, emptyList()).apply {
-                                    for (i in 0 until value.arguments.size) {
-                                        arguments[i] = if (i == recArgIndex) builder.irNull() else value.arguments[i]
-                                    }
-                                },
+                                builder.irCtorWithNullHole(value, recArgIndex),
                                 nameHint = "tmcCell",
                             )
                             +builder.irSetField(builder.irGet(dstParam), recField, builder.irGet(cell))
@@ -352,7 +349,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     // -------------------------------------------------------------- return-when normalization
 
-    private fun hasReturnWhenWithCtorCall(func: IrSimpleFunction): Boolean {
+    private fun hasReturnWhenWithCtorCall(func: IrSimpleFunction, candidates: Set<IrSimpleFunction>): Boolean {
         val funcSymbol = func.symbol
         var found = false
         func.body?.acceptVoid(object : IrVisitorVoid() {
@@ -369,7 +366,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                 val value = expression.value
                 if (value is IrWhen) {
                     for (branch in value.branches) {
-                        if (branchHasCtorWithCall(branch.result)) {
+                        if (branchHasCtorWithCall(branch.result, candidates)) {
                             found = true
                             return
                         }
@@ -380,13 +377,13 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         return found
     }
 
-    private fun branchHasCtorWithCall(expr: IrExpression): Boolean = when (expr) {
-        is IrConstructorCall -> expr.arguments.any { it is IrCall }
+    private fun branchHasCtorWithCall(expr: IrExpression, candidates: Set<IrSimpleFunction>): Boolean = when (expr) {
+        is IrConstructorCall -> expr.arguments.any { it is IrCall && it.symbol.owner in candidates }
         is IrBlock -> {
             val last = expr.statements.lastOrNull()
-            last is IrConstructorCall && last.arguments.any { it is IrCall }
+            last is IrConstructorCall && last.arguments.any { it is IrCall && it.symbol.owner in candidates }
         }
-        is IrWhen -> expr.branches.any { branchHasCtorWithCall(it.result) }
+        is IrWhen -> expr.branches.any { branchHasCtorWithCall(it.result, candidates) }
         else -> false
     }
 
@@ -487,21 +484,29 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     private fun IrClass.defaultTypeNullable(): IrType = symbol.defaultType.makeNullable()
 
+    /** Allocates [src]'s constructor with a null hole at [holeIndex]; the other arguments are taken from [src] as-is. */
+    private fun IrBuilderWithScope.irCtorWithNullHole(src: IrConstructorCall, holeIndex: Int): IrConstructorCall =
+        irCallConstructor(src.symbol, emptyList()).apply {
+            for (i in 0 until src.arguments.size) {
+                arguments[i] = if (i == holeIndex) irNull() else src.arguments[i]
+            }
+        }
+
     private fun createDpsSibling(
         container: IrDeclarationContainer,
         original: IrSimpleFunction,
         dstType: IrType,
     ): IrSimpleFunction {
         return context.irFactory.addFunction(container) {
-            name = org.jetbrains.kotlin.name.Name.identifier(original.name.asString() + "\$tmcDps")
+            name = Name.identifier(original.name.asString() + "\$tmcDps")
             visibility = DescriptorVisibilities.PRIVATE
             modality = Modality.FINAL
             returnType = context.irBuiltIns.unitType
-            origin = IrDeclarationOrigin.DEFINED
+            origin = TMC_DPS_FUNCTION
             startOffset = original.startOffset
             endOffset = original.endOffset
         }.apply {
-            // Copy original's value parameters then add `dst`.
+            // Parameter order must match the original so DPS call sites copy arguments positionally.
             for (origParam in original.parameters) {
                 addValueParameter(origParam.name, origParam.type)
             }
@@ -570,68 +575,9 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         nodes: List<IrSimpleFunction>,
         edges: Map<IrSimpleFunction, List<IrSimpleFunction>>,
     ): List<List<IrSimpleFunction>> {
-        val index = mutableMapOf<IrSimpleFunction, Int>()
-        val lowLink = mutableMapOf<IrSimpleFunction, Int>()
-        val onStack = mutableSetOf<IrSimpleFunction>()
-        val stack = ArrayDeque<IrSimpleFunction>()
-        var counter = 0
-        val sccs = mutableListOf<List<IrSimpleFunction>>()
-
-        fun strongConnect(v: IrSimpleFunction) {
-            // Iterative Tarjan would be cleaner but the call graph here is small.
-            // Recursion depth here is bounded by the number of TMC candidates in the file.
-            val workStack = ArrayDeque<Pair<IrSimpleFunction, Iterator<IrSimpleFunction>>>()
-            index[v] = counter
-            lowLink[v] = counter
-            counter++
-            stack.addLast(v)
-            onStack += v
-            workStack.addLast(v to (edges[v]?.iterator() ?: emptyList<IrSimpleFunction>().iterator()))
-
-            while (workStack.isNotEmpty()) {
-                val top = workStack.last()
-                val cur = top.first
-                val it = top.second
-                var descended = false
-                while (it.hasNext()) {
-                    val w = it.next()
-                    if (w !in index) {
-                        index[w] = counter
-                        lowLink[w] = counter
-                        counter++
-                        stack.addLast(w)
-                        onStack += w
-                        workStack.addLast(w to (edges[w]?.iterator() ?: emptyList<IrSimpleFunction>().iterator()))
-                        descended = true
-                        break
-                    } else if (w in onStack) {
-                        lowLink[cur] = minOf(lowLink[cur]!!, index[w]!!)
-                    }
-                }
-                if (descended) continue
-
-                if (lowLink[cur] == index[cur]) {
-                    val scc = mutableListOf<IrSimpleFunction>()
-                    while (true) {
-                        val w = stack.removeLast()
-                        onStack -= w
-                        scc += w
-                        if (w === cur) break
-                    }
-                    sccs += scc
-                }
-                workStack.removeLast()
-                if (workStack.isNotEmpty()) {
-                    val parent = workStack.last().first
-                    lowLink[parent] = minOf(lowLink[parent]!!, lowLink[cur]!!)
-                }
-            }
-        }
-
-        for (v in nodes) {
-            if (v !in index) strongConnect(v)
-        }
-        return sccs
+        val components = StronglyConnectedComponents<IrSimpleFunction> { edges[it].orEmpty().asSequence() }
+        for (v in nodes) components.visit(v)
+        return components.findComponents()
     }
 
     // -------------------------------------------------------------- DPS-loop (no return_call)
@@ -660,7 +606,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         if (retVal !is IrGetValue || retVal.symbol != m.resultVar.symbol) return false
         val body = func.body as IrBlockBody
         val stmts = body.statements
-        val resultVarIdx = stmts.indexOf(m.resultVar as IrStatement)
+        val resultVarIdx = stmts.indexOf(m.resultVar)
         if (resultVarIdx < 0 || resultVarIdx + 1 != stmts.size - 1) return false
 
         buildDpsLoopBody(func, m, ctorCall, recArgIndex, ctorClass, recField)
@@ -719,11 +665,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
 
             val headVar = createTmpVariable(
-                builder.irCallConstructor(ctorCall.symbol, emptyList()).apply {
-                    for (i in 0 until ctorCall.arguments.size) {
-                        arguments[i] = if (i == recArgIndex) builder.irNull() else ctorCall.arguments[i]
-                    }
-                },
+                builder.irCtorWithNullHole(ctorCall, recArgIndex),
                 nameHint = "\$head",
             )
             val dstVar = createTmpVariable(
@@ -751,8 +693,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
             mainLoop.body = builder.irBlock {
                 for (w in m.earlyReturnWhens) {
-                    val wCopy = (w as IrElement).deepCopyWithSymbols() as IrWhen
-                    remapSymbols(wCopy, paramToLocal)
+                    val wCopy = w.copyRemapped(paramToLocal)
                     wCopy.transform(object : IrTransformer<Nothing?>() {
                         override fun visitReturn(expression: IrReturn, data: Nothing?): IrExpression {
                             if (expression.returnTargetSymbol != func.symbol)
@@ -769,16 +710,14 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
                 val loopPreVarMap = mutableMapOf<IrValueSymbol, IrValueSymbol>()
                 for (v in m.preVars) {
-                    val vCopy = (v as IrElement).deepCopyWithSymbols() as IrVariable
-                    remapSymbols(vCopy, paramToLocal)
+                    val vCopy = v.copyRemapped(paramToLocal)
                     loopPreVarMap[v.symbol] = vCopy.symbol
                     +vCopy
                 }
 
                 val loopLocalMap = paramToLocal + loopPreVarMap
 
-                val condCopy = m.recursiveBranchCondition.deepCopyWithSymbols()
-                remapSymbols(condCopy, loopLocalMap)
+                val condCopy = m.recursiveBranchCondition.copyRemapped(loopLocalMap)
 
                 +irIfThenElse(
                     context.irBuiltIns.unitType,
@@ -787,14 +726,9 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                         val preEffectsCopy = deepCopyStatements(m.recPreEffects, loopLocalMap)
                         for (e in preEffectsCopy) +e
 
-                        val ctorCallCopy = ctorCall.deepCopyWithSymbols()
-                        remapSymbols(ctorCallCopy, loopLocalMap)
+                        val ctorCallCopy = ctorCall.copyRemapped(loopLocalMap)
                         val cell = createTmpVariable(
-                            irCallConstructor(ctorCallCopy.symbol, emptyList()).apply {
-                                for (i in 0 until ctorCallCopy.arguments.size) {
-                                    arguments[i] = if (i == recArgIndex) irNull() else ctorCallCopy.arguments[i]
-                                }
-                            },
+                            irCtorWithNullHole(ctorCallCopy, recArgIndex),
                             nameHint = "\$cell",
                         )
 
@@ -802,11 +736,10 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                         +irSet(dstVar.symbol, irGet(cell))
                         +irSet(
                             depthVar.symbol,
-                            irCallOp(intPlusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(1)),
+                            irCallOp(context.irBuiltIns.intPlusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(1)),
                         )
 
-                        val recCallCopy = recCall.deepCopyWithSymbols()
-                        remapSymbols(recCallCopy, loopLocalMap)
+                        val recCallCopy = recCall.copyRemapped(loopLocalMap)
                         for (pv in mutableParamVars) {
                             val param = pv.first
                             val localVar = pv.second
@@ -821,8 +754,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                     },
                     irBlock {
                         for (branch in m.baseBranches) {
-                            val brCopy = (branch as IrElement).deepCopyWithSymbols() as IrBranch
-                            remapSymbols(brCopy, loopLocalMap)
+                            val brCopy = branch.copyRemapped(loopLocalMap)
                             val baseExpr = brCopy.result
                             +irSetField(irGet(dstVar), recField, baseExpr)
                         }
@@ -865,31 +797,22 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             +irBuilder.irWhile().apply {
                 condition = irBuilder.irNotEquals(irBuilder.irGet(ri), irBuilder.irGet(depthVar))
                 this.body = irBuilder.irBlock {
-                    val wrapper = IrBlockImpl(0, 0, context.irBuiltIns.unitType)
-                    wrapper.statements.addAll(postEffects)
-                    val wrapperCopy = wrapper.deepCopyWithSymbols() as IrBlock
-                    for (stmt in wrapperCopy.statements) {
-                        remapSymbols(stmt, paramMapping)
-                        +stmt
-                    }
+                    for (stmt in deepCopyStatements(postEffects, paramMapping)) +stmt
                     +irBuilder.irSet(
                         ri.symbol,
-                        irBuilder.irCallOp(intPlusSymbol, context.irBuiltIns.intType, irBuilder.irGet(ri), irBuilder.irInt(1)),
+                        irBuilder.irCallOp(context.irBuiltIns.intPlusSymbol, context.irBuiltIns.intType, irBuilder.irGet(ri), irBuilder.irInt(1)),
                     )
                 }
             }
         }
     }
 
-    // -------------------------------------------------------------- helpers
-
-    // -------------------------------------------------------------- general iterative rec
+    // -------------------------------------------------------------- recursive-shape matching
 
     private data class IterativeRecMatch(
         val earlyReturnWhens: List<IrWhen>,
         val preVars: List<IrVariable>,
         val resultVar: IrVariable,
-        val recursiveBranchIdx: Int,
         val recursiveBranchCondition: IrExpression,
         val recPreEffects: List<IrStatement>,
         val recCallVar: IrVariable,
@@ -903,9 +826,13 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     private fun countSelfCalls(func: IrSimpleFunction): Int {
         var count = 0
         func.body?.acceptVoid(object : IrVisitorVoid() {
-            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+            override fun visitElement(element: IrElement) {
+                if (count > 1) return
+                element.acceptChildrenVoid(this)
+            }
             override fun visitCall(expression: IrCall) {
                 if (expression.symbol == func.symbol) count++
+                if (count > 1) return
                 expression.acceptChildrenVoid(this)
             }
         })
@@ -913,7 +840,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     }
 
     private fun matchIterativeRecShape(func: IrSimpleFunction): IterativeRecMatch? {
-        if (countSelfCalls(func) != 1) return null
+        // Cheap structural rejections first; the self-call count needs a body traversal.
         val body = func.body as? IrBlockBody ?: return null
         val stmts = body.statements
         if (stmts.size < 2) return null
@@ -927,6 +854,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             if (v.initializer is IrWhen) { resultVarIdx = i; break }
         }
         if (resultVarIdx < 0) return null
+        if (countSelfCalls(func) != 1) return null
 
         val resultVar = stmts[resultVarIdx] as IrVariable
         val whenExpr = resultVar.initializer as IrWhen
@@ -999,7 +927,6 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             earlyReturnWhens = earlyReturnWhens,
             preVars = preVars,
             resultVar = resultVar,
-            recursiveBranchIdx = recBranchIdx,
             recursiveBranchCondition = whenExpr.branches[recBranchIdx].condition,
             recPreEffects = matchedPreEffects!!,
             recCallVar = matchedRecCallVar!!,
@@ -1011,26 +938,24 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         )
     }
 
-    private val intPlusSymbol: IrSimpleFunctionSymbol by lazy {
-        context.irBuiltIns.intClass.owner.declarations
-            .filterIsInstance<IrSimpleFunction>()
-            .single {
-                it.name.asString() == "plus"
-                        && it.returnType == context.irBuiltIns.intType
-                        && it.parameters.last().type == context.irBuiltIns.intType
-            }.symbol
-    }
 
     private fun remapSymbols(element: IrElement, mapping: Map<IrValueSymbol, IrValueSymbol>) {
-        element.transform(object : IrTransformer<Nothing?>() {
-            override fun visitGetValue(expression: IrGetValue, data: Nothing?): IrExpression {
-                val newSym = mapping[expression.symbol] ?: return super.visitGetValue(expression, data)
-                return IrGetValueImpl(expression.startOffset, expression.endOffset, expression.type, newSym)
-            }
+        if (mapping.isEmpty()) return
+        element.transform(object : AbstractVariableRemapper() {
+            override fun remapVariable(value: IrValueDeclaration): IrValueDeclaration? = mapping[value.symbol]?.owner
         }, null)
     }
 
+    private inline fun <reified T : IrElement> T.copyRemapped(mapping: Map<IrValueSymbol, IrValueSymbol>): T {
+        val copy = deepCopyWithSymbols()
+        remapSymbols(copy, mapping)
+        return copy
+    }
+
 }
+
+/** Marks the synthesized `f\$tmcDps` destination-passing helpers. */
+internal val TMC_DPS_FUNCTION by IrDeclarationOriginImpl.Regular
 
 private data class TmcSite(
     val returnExpr: IrReturn,
@@ -1052,6 +977,5 @@ private fun effectiveCall(arg: IrExpression): Pair<IrCall, Boolean>? {
     return null
 }
 
-private fun IrElement.acceptVoid(visitor: IrVisitorVoid) = accept(visitor, null)
 
 
