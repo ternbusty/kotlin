@@ -11,18 +11,24 @@ import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
+import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
+import org.jetbrains.kotlin.config.MessageCollectorAccess
+import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
+import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.*
-import org.jetbrains.kotlin.ir.builders.declarations.addFunction
-import org.jetbrains.kotlin.ir.builders.declarations.addValueParameter
+import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
+import org.jetbrains.kotlin.ir.expressions.impl.IrBlockImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrBreakImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrGetValueImpl
+import org.jetbrains.kotlin.ir.expressions.impl.IrInstanceInitializerCallImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrReturnImpl
+import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
@@ -30,11 +36,13 @@ import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.types.typeWith
+import org.jetbrains.kotlin.ir.util.createThisReceiverParameter
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.util.properties
+import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.ir.visitors.IrTransformer
 import org.jetbrains.kotlin.ir.visitors.IrVisitor
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
@@ -73,9 +81,13 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 internal class WasmTailModConsLowering(private val context: WasmBackendContext) : FileLoweringPass {
 
     private val messageCollector: MessageCollector?
+        @OptIn(MessageCollectorAccess::class)
         get() = context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
 
+    private val enabled = context.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TMC) == true
+
     override fun lower(irFile: IrFile) {
+        if (!enabled) return
         val allFunctions = mutableListOf<IrSimpleFunction>()
         irFile.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
@@ -91,7 +103,21 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
         val transformed = mutableSetOf<IrSimpleFunction>()
 
+        // DPS-loop runs first: for functions matching the iterative-rec shape where
+        // post-effects don't reference savedVars or the recursive result, use
+        // destination-passing style with mutable struct fields inside a while(true) loop.
+        // The loop allocates a cell, fills the previous hole (dst.field = cell),
+        // advances dst, and re-evaluates the branch condition.  At the base case the
+        // deferred post-effects are replayed `depth` times in a simple loop.
+        // No separate DPS function or return_call, so V8 loop optimizations apply.
         for (f in allFunctions) {
+            if (tryDpsLoopTransform(f)) {
+                transformed += f
+            }
+        }
+
+        for (f in allFunctions) {
+            if (f in transformed) continue
             if (hasReturnWhenWithCtorCall(f)) {
                 normalizeReturnWhen(f)
             }
@@ -106,8 +132,8 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
         if (sitesByFunc.isNotEmpty()) {
             val candidateSet = sitesByFunc.keys
-            val edges: Map<IrSimpleFunction, List<IrSimpleFunction>> = sitesByFunc.mapValues { (_, sites) ->
-                sites.mapNotNull { s ->
+            val edges: Map<IrSimpleFunction, List<IrSimpleFunction>> = sitesByFunc.mapValues { entry ->
+                entry.value.mapNotNull { s ->
                     val callee = s.recursiveCall.symbol.owner
                     if (callee in candidateSet) callee else null
                 }.distinct()
@@ -155,10 +181,6 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
-        for (f in allFunctions) {
-            if (f in transformed) continue
-            tryIterativeRecTransform(f)
-        }
     }
 
     private fun reportSites(func: IrSimpleFunction, sites: List<TmcSite>, transformed: Boolean) {
@@ -251,8 +273,8 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val ctorSymbol = site.ctorCall.symbol
         val recArgIndex = site.recursiveArgIndex
 
-        val paramMapping: Map<IrValueSymbol, IrValueSymbol> = original.parameters.withIndex().associate { (i, p) ->
-            p.symbol to dps.parameters[i].symbol
+        val paramMapping: Map<IrValueSymbol, IrValueSymbol> = original.parameters.withIndex().associate { iv ->
+            iv.value.symbol to dps.parameters[iv.index].symbol
         }
         if (paramMapping.isNotEmpty()) remapSymbols(bodyCopy, paramMapping)
 
@@ -526,13 +548,13 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                 val argCount = ctor.arguments.size
                 for (i in argCount - 1 downTo 0) {
                     val arg = ctor.arguments[i] ?: continue
-                    val (call, viaVar) = effectiveCall(arg) ?: run {
+                    val effective = effectiveCall(arg) ?: run {
                         if (arg is IrConst || arg is IrGetValue || arg is IrGetField || arg is IrGetObjectValue) {
                             continue
                         }
                         return
                     }
-                    results += TmcSite(returnExpr, ctor, call, i, viaVar)
+                    results += TmcSite(returnExpr, ctor, effective.first, i, effective.second)
                     return
                 }
             }
@@ -567,7 +589,9 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             workStack.addLast(v to (edges[v]?.iterator() ?: emptyList<IrSimpleFunction>().iterator()))
 
             while (workStack.isNotEmpty()) {
-                val (cur, it) = workStack.last()
+                val top = workStack.last()
+                val cur = top.first
+                val it = top.second
                 var descended = false
                 while (it.hasNext()) {
                     val w = it.next()
@@ -608,6 +632,253 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             if (v !in index) strongConnect(v)
         }
         return sccs
+    }
+
+    // -------------------------------------------------------------- DPS-loop (no return_call)
+
+    private fun tryDpsLoopTransform(func: IrSimpleFunction): Boolean {
+        val m = matchIterativeRecShape(func) ?: return false
+        if (m.savedVars.isNotEmpty()) {
+            for (sv in m.savedVars) {
+                if (referencesSymbol(m.recPostEffects, sv.symbol)) return false
+            }
+        }
+        if (m.recPostEffects.isEmpty()) return false
+        if (referencesSymbol(m.recPostEffects, m.recCallVar.symbol)) return false
+
+        val ctorCall = m.recFinalExpr as? IrConstructorCall ?: return false
+        val recArgIndex = ctorCall.arguments.indexOfFirst { arg ->
+            arg is IrGetValue && arg.symbol == m.recCallVar.symbol
+        }
+        if (recArgIndex < 0) return false
+        val ctorClass = ctorCall.symbol.owner.parentClassOrNull ?: return false
+        val ctorParams = ctorCall.symbol.owner.parameters
+        val recParam = ctorParams.getOrNull(recArgIndex) ?: return false
+        if (recParam.type.classifierOrFail != func.returnType.classifierOrFail) return false
+        val recField = findRecursiveBackingField(ctorCall, recArgIndex) ?: return false
+        val retVal = m.returnStmt.value
+        if (retVal !is IrGetValue || retVal.symbol != m.resultVar.symbol) return false
+        val body = func.body as IrBlockBody
+        val stmts = body.statements
+        val resultVarIdx = stmts.indexOf(m.resultVar as IrStatement)
+        if (resultVarIdx < 0 || resultVarIdx + 1 != stmts.size - 1) return false
+
+        buildDpsLoopBody(func, m, ctorCall, recArgIndex, ctorClass, recField)
+
+        messageCollector?.report(
+            CompilerMessageSeverity.STRONG_WARNING,
+            "[wasm-tmc] DPS-loop transformed: ${func.fqNameWhenAvailable ?: func.name}",
+        )
+        return true
+    }
+
+    private fun referencesSymbol(elements: List<IrStatement>, symbol: IrValueSymbol): Boolean {
+        for (element in elements) {
+            var found = false
+            element.acceptVoid(object : IrVisitorVoid() {
+                override fun visitElement(element: IrElement) {
+                    if (!found) element.acceptChildrenVoid(this)
+                }
+                override fun visitGetValue(expression: IrGetValue) {
+                    if (expression.symbol == symbol) found = true
+                }
+            })
+            if (found) return true
+        }
+        return false
+    }
+
+    private fun buildDpsLoopBody(
+        func: IrSimpleFunction,
+        m: IterativeRecMatch,
+        ctorCall: IrConstructorCall,
+        recArgIndex: Int,
+        ctorClass: IrClass,
+        recField: IrField,
+    ) {
+        val body = func.body as IrBlockBody
+        val builder = context.createIrBuilder(func.symbol, body.startOffset, body.endOffset)
+
+        val recCall = m.recCallVar.initializer as IrCall
+
+        val mutableParamVars = mutableListOf<Pair<IrValueParameter, IrVariable>>()
+
+        val recCallArgSymbols = mutableSetOf<IrValueSymbol>()
+        for (arg in recCall.arguments) {
+            if (arg is IrGetValue) recCallArgSymbols.add(arg.symbol)
+        }
+
+        body.statements.clear()
+        body.statements += builder.irBlockBody {
+            for (w in m.earlyReturnWhens) {
+                +w
+            }
+
+            for (v in m.preVars) {
+                +v
+            }
+
+            val headVar = createTmpVariable(
+                builder.irCallConstructor(ctorCall.symbol, emptyList()).apply {
+                    for (i in 0 until ctorCall.arguments.size) {
+                        arguments[i] = if (i == recArgIndex) builder.irNull() else ctorCall.arguments[i]
+                    }
+                },
+                nameHint = "\$head",
+            )
+            val dstVar = createTmpVariable(
+                builder.irGet(headVar),
+                nameHint = "\$dst",
+                isMutable = true,
+                irType = ctorClass.symbol.defaultType.makeNullable(),
+            )
+            val depthVar = createTmpVariable(builder.irInt(0), nameHint = "\$depth", isMutable = true)
+
+            for (param in func.parameters) {
+                if (param.symbol in recCallArgSymbols) continue
+                val localCopy = createTmpVariable(
+                    builder.irGet(param), nameHint = param.name.asString(), isMutable = true, irType = param.type,
+                )
+                mutableParamVars.add(param to localCopy)
+            }
+
+            val paramToLocal: Map<IrValueSymbol, IrValueSymbol> =
+                mutableParamVars.associate { pv -> pv.first.symbol to pv.second.symbol }
+
+            val mainLoop = builder.irWhile().apply {
+                condition = builder.irTrue()
+            }
+
+            mainLoop.body = builder.irBlock {
+                for (w in m.earlyReturnWhens) {
+                    val wCopy = (w as IrElement).deepCopyWithSymbols() as IrWhen
+                    remapSymbols(wCopy, paramToLocal)
+                    wCopy.transform(object : IrTransformer<Nothing?>() {
+                        override fun visitReturn(expression: IrReturn, data: Nothing?): IrExpression {
+                            if (expression.returnTargetSymbol != func.symbol)
+                                return super.visitReturn(expression, data)
+                            return builder.irBlock {
+                                +builder.irSetField(builder.irGet(dstVar), recField, expression.value)
+                                buildReplayLoop(this, builder, depthVar, m.recPostEffects, paramToLocal)
+                                +builder.irReturn(builder.irGetField(builder.irGet(headVar), recField))
+                            }
+                        }
+                    }, null)
+                    +wCopy
+                }
+
+                val loopPreVarMap = mutableMapOf<IrValueSymbol, IrValueSymbol>()
+                for (v in m.preVars) {
+                    val vCopy = (v as IrElement).deepCopyWithSymbols() as IrVariable
+                    remapSymbols(vCopy, paramToLocal)
+                    loopPreVarMap[v.symbol] = vCopy.symbol
+                    +vCopy
+                }
+
+                val loopLocalMap = paramToLocal + loopPreVarMap
+
+                val condCopy = m.recursiveBranchCondition.deepCopyWithSymbols()
+                remapSymbols(condCopy, loopLocalMap)
+
+                +irIfThenElse(
+                    context.irBuiltIns.unitType,
+                    condCopy,
+                    irBlock {
+                        val preEffectsCopy = deepCopyStatements(m.recPreEffects, loopLocalMap)
+                        for (e in preEffectsCopy) +e
+
+                        val ctorCallCopy = ctorCall.deepCopyWithSymbols()
+                        remapSymbols(ctorCallCopy, loopLocalMap)
+                        val cell = createTmpVariable(
+                            irCallConstructor(ctorCallCopy.symbol, emptyList()).apply {
+                                for (i in 0 until ctorCallCopy.arguments.size) {
+                                    arguments[i] = if (i == recArgIndex) irNull() else ctorCallCopy.arguments[i]
+                                }
+                            },
+                            nameHint = "\$cell",
+                        )
+
+                        +irSetField(irGet(dstVar), recField, irGet(cell))
+                        +irSet(dstVar.symbol, irGet(cell))
+                        +irSet(
+                            depthVar.symbol,
+                            irCallOp(intPlusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(1)),
+                        )
+
+                        val recCallCopy = recCall.deepCopyWithSymbols()
+                        remapSymbols(recCallCopy, loopLocalMap)
+                        for (pv in mutableParamVars) {
+                            val param = pv.first
+                            val localVar = pv.second
+                            val argIdx = func.parameters.indexOf(param)
+                            val newArg = recCallCopy.arguments[argIdx]
+                            if (newArg != null) {
+                                +irSet(localVar.symbol, newArg)
+                            }
+                        }
+
+                        +builder.irContinue(mainLoop)
+                    },
+                    irBlock {
+                        for (branch in m.baseBranches) {
+                            val brCopy = (branch as IrElement).deepCopyWithSymbols() as IrBranch
+                            remapSymbols(brCopy, loopLocalMap)
+                            val baseExpr = brCopy.result
+                            +irSetField(irGet(dstVar), recField, baseExpr)
+                        }
+                    },
+                )
+                +builder.irBreak(mainLoop)
+            }
+
+            +mainLoop
+
+            buildReplayLoop(this, builder, depthVar, m.recPostEffects, paramToLocal)
+            +builder.irReturn(builder.irGetField(builder.irGet(headVar), recField))
+        }.statements
+
+        body.patchDeclarationParents(func)
+    }
+
+    private fun deepCopyStatements(
+        stmts: List<IrStatement>,
+        paramMapping: Map<IrValueSymbol, IrValueSymbol>,
+    ): List<IrStatement> {
+        val wrapper = IrBlockImpl(0, 0, context.irBuiltIns.unitType)
+        wrapper.statements.addAll(stmts)
+        val copy = wrapper.deepCopyWithSymbols() as IrBlock
+        for (stmt in copy.statements) {
+            remapSymbols(stmt, paramMapping)
+        }
+        return copy.statements
+    }
+
+    private fun buildReplayLoop(
+        blockBuilder: IrStatementsBuilder<*>,
+        irBuilder: IrBuilderWithScope,
+        depthVar: IrVariable,
+        postEffects: List<IrStatement>,
+        paramMapping: Map<IrValueSymbol, IrValueSymbol>,
+    ) {
+        val ri = blockBuilder.createTmpVariable(irBuilder.irInt(0), nameHint = "\$ri", isMutable = true)
+        blockBuilder.apply {
+            +irBuilder.irWhile().apply {
+                condition = irBuilder.irNotEquals(irBuilder.irGet(ri), irBuilder.irGet(depthVar))
+                this.body = irBuilder.irBlock {
+                    val wrapper = IrBlockImpl(0, 0, context.irBuiltIns.unitType)
+                    wrapper.statements.addAll(postEffects)
+                    val wrapperCopy = wrapper.deepCopyWithSymbols() as IrBlock
+                    for (stmt in wrapperCopy.statements) {
+                        remapSymbols(stmt, paramMapping)
+                        +stmt
+                    }
+                    +irBuilder.irSet(
+                        ri.symbol,
+                        irBuilder.irCallOp(intPlusSymbol, context.irBuiltIns.intType, irBuilder.irGet(ri), irBuilder.irInt(1)),
+                    )
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------- helpers
@@ -666,12 +937,16 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         var matchedPostEffects: List<IrStatement>? = null
         var matchedRecFinalExpr: IrExpression? = null
 
-        for ((idx, branch) in whenExpr.branches.withIndex()) {
+        for (branchIv in whenExpr.branches.withIndex()) {
+            val idx = branchIv.index
+            val branch = branchIv.value
             val block = branch.result as? IrBlock ?: continue
             val blockStmts = block.statements
             if (blockStmts.isEmpty()) continue
 
-            for ((j, s) in blockStmts.withIndex()) {
+            for (stmtIv in blockStmts.withIndex()) {
+                val j = stmtIv.index
+                val s = stmtIv.value
                 val v = s as? IrVariable ?: continue
                 val call = v.initializer as? IrCall ?: continue
                 if (call.symbol != func.symbol) continue
@@ -736,250 +1011,6 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         )
     }
 
-    private fun tryIterativeRecTransform(func: IrSimpleFunction) {
-        val m = matchIterativeRecShape(func) ?: return
-        val body = func.body as IrBlockBody
-        val builder = context.createIrBuilder(func.symbol, body.startOffset, body.endOffset)
-
-        messageCollector?.report(
-            CompilerMessageSeverity.STRONG_WARNING,
-            "[wasm-tmc] match: func=${func.name}, earlyReturnWhens=${m.earlyReturnWhens.size}, " +
-                    "preVars=${m.preVars.size}, savedVars=${m.savedVars.size}, " +
-                    "recPreEffects=${m.recPreEffects.size}, recPostEffects=${m.recPostEffects.size}",
-        )
-
-        val recCall = m.recCallVar.initializer as IrCall
-        val sameParams = func.parameters.indices.all { i ->
-            val arg = recCall.arguments[i]
-            arg is IrGetValue && arg.symbol == func.parameters[i].symbol
-        }
-
-        val funcCopy = func.deepCopyWithSymbols()
-        val mCopy = matchIterativeRecShape(funcCopy)!!
-        val copyParamMap: Map<IrValueSymbol, IrValueSymbol> =
-            funcCopy.parameters.withIndex().associate { (i, cp) -> cp.symbol to func.parameters[i].symbol }
-
-        val needsStack = m.savedVars.isNotEmpty()
-        val anyNType = context.irBuiltIns.anyNType
-
-        val newBody = builder.irBlockBody {
-            val paramVars = if (!sameParams) {
-                func.parameters.map { p ->
-                    createTmpVariable(irGet(p), nameHint = "\$${p.name}", isMutable = true)
-                }
-            } else null
-            val paramMap: Map<IrValueSymbol, IrValueSymbol> = if (paramVars != null) {
-                func.parameters.withIndex().associate { (i, p) -> p.symbol to paramVars[i].symbol }
-            } else emptyMap()
-
-            val combinedMap = copyParamMap + paramMap
-
-            val depthVar = createTmpVariable(irInt(0), nameHint = "\$depth", isMutable = true)
-
-            val stackVar: IrVariable?
-            val stackCapVar: IrVariable?
-            val arrayType = context.irBuiltIns.arrayClass.typeWith(anyNType)
-            if (needsStack) {
-                stackCapVar = createTmpVariable(irInt(16), nameHint = "\$stackCap", isMutable = true)
-                stackVar = createTmpVariable(
-                    irCall(context.irBuiltIns.arrayOfNulls, arrayType).apply {
-                        typeArguments[0] = anyNType
-                        arguments[0] = irInt(16 * m.savedVars.size)
-                    },
-                    nameHint = "\$stack",
-                    isMutable = true,
-                )
-            } else {
-                stackVar = null
-                stackCapVar = null
-            }
-
-            +irWhile().apply {
-                condition = irTrue()
-                this.body = irBlock {
-                    for (w in m.earlyReturnWhens) {
-                        transformReturnsToBreaks(w, func.symbol, this@apply)
-                        if (paramMap.isNotEmpty()) remapSymbols(w, paramMap)
-                        +w
-                    }
-                    for (v in m.preVars) {
-                        if (paramMap.isNotEmpty()) remapSymbols(v, paramMap)
-                        +v
-                    }
-
-                    if (paramMap.isNotEmpty()) remapSymbols(m.recursiveBranchCondition, paramMap)
-                    +irIfThenElse(
-                        context.irBuiltIns.unitType,
-                        m.recursiveBranchCondition,
-                        irBlock {},
-                        irBreak(this@apply),
-                    )
-
-                    for (effect in m.recPreEffects) {
-                        if (paramMap.isNotEmpty()) remapSymbols(effect, paramMap)
-                        +effect
-                    }
-
-                    if (needsStack && stackVar != null && stackCapVar != null) {
-                        +irIfThen(
-                            context.irBuiltIns.unitType,
-                            irEquals(irGet(depthVar), irGet(stackCapVar)),
-                            irBlock {
-                                val newCap = createTmpVariable(
-                                    irCallOp(intTimesSymbol, context.irBuiltIns.intType,
-                                        irGet(stackCapVar), irInt(2)),
-                                    nameHint = "\$newCap",
-                                )
-                                val newArr = createTmpVariable(
-                                    irCall(context.irBuiltIns.arrayOfNulls, arrayType).apply {
-                                        typeArguments[0] = anyNType
-                                        arguments[0] = irCallOp(intTimesSymbol, context.irBuiltIns.intType,
-                                            irGet(newCap), irInt(m.savedVars.size))
-                                    },
-                                    nameHint = "\$newArr",
-                                )
-                                val copyIdx = createTmpVariable(irInt(0), nameHint = "\$ci", isMutable = true)
-                                val oldLen = irCallOp(intTimesSymbol, context.irBuiltIns.intType,
-                                    irGet(stackCapVar), irInt(m.savedVars.size))
-                                +irWhile().apply {
-                                    condition = irNotEquals(irGet(copyIdx), oldLen)
-                                    this.body = irBlock {
-                                        +irCall(arraySetSymbol).apply {
-                                            arguments[0] = irGet(newArr)
-                                            arguments[1] = irGet(copyIdx)
-                                            arguments[2] = irCall(arrayGetSymbol).apply {
-                                                arguments[0] = irGet(stackVar)
-                                                arguments[1] = irGet(copyIdx)
-                                            }
-                                        }
-                                        +irSet(copyIdx.symbol, irCallOp(intPlusSymbol,
-                                            context.irBuiltIns.intType, irGet(copyIdx), irInt(1)))
-                                    }
-                                }
-                                +irSet(stackVar.symbol, irGet(newArr))
-                                +irSet(stackCapVar.symbol, irGet(newCap))
-                            }
-                        )
-                        for ((si, sv) in m.savedVars.withIndex()) {
-                            val idx = irCallOp(intPlusSymbol, context.irBuiltIns.intType,
-                                irCallOp(intTimesSymbol, context.irBuiltIns.intType,
-                                    irGet(depthVar), irInt(m.savedVars.size)),
-                                irInt(si))
-                            +irCall(arraySetSymbol).apply {
-                                arguments[0] = irGet(stackVar)
-                                arguments[1] = idx
-                                arguments[2] = irGet(sv)
-                            }
-                        }
-                    }
-
-                    if (paramVars != null) {
-                        val recCallCopy = mCopy.recCallVar.initializer as IrCall
-                        val argTmps = func.parameters.mapIndexed { i, _ ->
-                            val arg = recCallCopy.arguments[i]!!
-                            remapSymbols(arg, combinedMap)
-                            createTmpVariable(arg, nameHint = "next$i")
-                        }
-                        for ((i, tmp) in argTmps.withIndex()) {
-                            +irSet(paramVars[i].symbol, irGet(tmp))
-                        }
-                    }
-
-                    +irSet(depthVar.symbol, irCallOp(intPlusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(1)))
-                }
-            }
-
-            for (v in mCopy.preVars) {
-                remapSymbols(v, combinedMap)
-                +v
-            }
-
-            val baseCaseExpr = buildGeneralBaseCaseWhen(mCopy, combinedMap)
-            val resultVar = createTmpVariable(
-                baseCaseExpr,
-                nameHint = "\$result",
-                isMutable = true,
-                irType = func.returnType,
-            )
-
-            val postStmtsCopy = mCopy.returnStmt
-            val resultVarCopySymbol = mCopy.resultVar.symbol
-            remapSymbols(postStmtsCopy, combinedMap + mapOf(resultVarCopySymbol to resultVar.symbol))
-            if (postStmtsCopy.value is IrGetValue &&
-                (postStmtsCopy.value as IrGetValue).symbol == resultVar.symbol
-            ) {
-                // no-op: simple return of result
-            } else {
-                val postWrapCopy = postStmtsCopy.value.deepCopyWithSymbols()
-                remapSymbols(postWrapCopy, mapOf(resultVarCopySymbol to resultVar.symbol) + combinedMap)
-                +irSet(resultVar.symbol, postWrapCopy)
-            }
-
-            +irWhile().apply {
-                condition = irNotEquals(irGet(depthVar), irInt(0))
-                this.body = irBlock {
-                    +irSet(depthVar.symbol, irCallOp(intMinusSymbol, context.irBuiltIns.intType, irGet(depthVar), irInt(1)))
-
-                    val savedVarMap = mutableMapOf<IrValueSymbol, IrValueSymbol>()
-                    if (needsStack && stackVar != null) {
-                        for ((si, sv) in m.savedVars.withIndex()) {
-                            val restoredVarCopy = sv.deepCopyWithSymbols()
-                            val idx = irCallOp(intPlusSymbol, context.irBuiltIns.intType,
-                                irCallOp(intTimesSymbol, context.irBuiltIns.intType,
-                                    irGet(depthVar), irInt(m.savedVars.size)),
-                                irInt(si))
-                            restoredVarCopy.initializer = irImplicitCast(
-                                irCall(arrayGetSymbol).apply {
-                                    arguments[0] = irGet(stackVar)
-                                    arguments[1] = idx
-                                },
-                                sv.type,
-                            )
-                            +restoredVarCopy
-                            savedVarMap[sv.symbol] = restoredVarCopy.symbol
-                            savedVarMap[mCopy.savedVars[si].symbol] = restoredVarCopy.symbol
-                        }
-                    }
-
-                    val backwardRemap = savedVarMap + paramMap
-                    for (effect in m.recPostEffects) {
-                        if (backwardRemap.isNotEmpty()) {
-                            val effectCopy = (effect as IrElement).deepCopyWithSymbols() as IrStatement
-                            remapSymbols(effectCopy, backwardRemap)
-                            +effectCopy
-                        } else {
-                            +effect
-                        }
-                    }
-
-                    val recVarSymbol = m.recCallVar.symbol
-                    val finalExprCopy = m.recFinalExpr.deepCopyWithSymbols()
-                    remapSymbols(finalExprCopy, savedVarMap + mapOf(recVarSymbol to resultVar.symbol))
-                    if (paramMap.isNotEmpty()) remapSymbols(finalExprCopy, paramMap)
-                    +irSet(resultVar.symbol, finalExprCopy)
-
-                    val returnExprCopy2 = mCopy.returnStmt.value.deepCopyWithSymbols()
-                    val returnRemap = combinedMap + mapOf(resultVarCopySymbol to resultVar.symbol) + savedVarMap
-                    remapSymbols(returnExprCopy2, returnRemap)
-                    if (!(returnExprCopy2 is IrGetValue && returnExprCopy2.symbol == resultVar.symbol)) {
-                        +irSet(resultVar.symbol, returnExprCopy2)
-                    }
-                }
-            }
-
-            +irReturn(irGet(resultVar))
-        }
-
-        body.statements.clear()
-        body.statements += newBody.statements
-        body.patchDeclarationParents(func)
-
-        messageCollector?.report(
-            CompilerMessageSeverity.STRONG_WARNING,
-            "[wasm-tmc] iterative-rec transformed: ${func.fqNameWhenAvailable ?: func.name}",
-        )
-    }
-
     private val intPlusSymbol: IrSimpleFunctionSymbol by lazy {
         context.irBuiltIns.intClass.owner.declarations
             .filterIsInstance<IrSimpleFunction>()
@@ -990,77 +1021,11 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }.symbol
     }
 
-    private val intMinusSymbol: IrSimpleFunctionSymbol by lazy {
-        context.irBuiltIns.intClass.owner.declarations
-            .filterIsInstance<IrSimpleFunction>()
-            .single {
-                it.name.asString() == "minus"
-                        && it.returnType == context.irBuiltIns.intType
-                        && it.parameters.last().type == context.irBuiltIns.intType
-            }.symbol
-    }
-
-    private val intTimesSymbol: IrSimpleFunctionSymbol by lazy {
-        context.irBuiltIns.intClass.owner.declarations
-            .filterIsInstance<IrSimpleFunction>()
-            .single {
-                it.name.asString() == "times"
-                        && it.returnType == context.irBuiltIns.intType
-                        && it.parameters.last().type == context.irBuiltIns.intType
-            }.symbol
-    }
-
-    private val arrayGetSymbol: IrSimpleFunctionSymbol by lazy {
-        context.irBuiltIns.arrayClass.owner.declarations
-            .filterIsInstance<IrSimpleFunction>()
-            .first { it.name.asString() == "get" }
-            .symbol
-    }
-
-    private val arraySetSymbol: IrSimpleFunctionSymbol by lazy {
-        context.irBuiltIns.arrayClass.owner.declarations
-            .filterIsInstance<IrSimpleFunction>()
-            .first { it.name.asString() == "set" }
-            .symbol
-    }
-
-    private fun IrBlockBodyBuilder.buildGeneralBaseCaseWhen(
-        mCopy: IterativeRecMatch,
-        combinedMap: Map<IrValueSymbol, IrValueSymbol>,
-    ): IrExpression {
-        val branches = mutableListOf<IrBranch>()
-        for (w in mCopy.earlyReturnWhens) {
-            for (branch in w.branches) {
-                remapSymbols(branch, combinedMap)
-                val value = (branch.result as IrReturn).value
-                branches += irBranch(branch.condition, value)
-            }
-        }
-        for (branch in mCopy.baseBranches) {
-            remapSymbols(branch, combinedMap)
-            branches += branch
-        }
-        return irWhen(context.irBuiltIns.anyNType, branches)
-    }
-
     private fun remapSymbols(element: IrElement, mapping: Map<IrValueSymbol, IrValueSymbol>) {
         element.transform(object : IrTransformer<Nothing?>() {
             override fun visitGetValue(expression: IrGetValue, data: Nothing?): IrExpression {
                 val newSym = mapping[expression.symbol] ?: return super.visitGetValue(expression, data)
                 return IrGetValueImpl(expression.startOffset, expression.endOffset, expression.type, newSym)
-            }
-        }, null)
-    }
-
-    private fun transformReturnsToBreaks(
-        element: IrElement,
-        funcSymbol: IrSimpleFunctionSymbol,
-        loop: IrLoop,
-    ) {
-        element.transform(object : IrTransformer<Nothing?>() {
-            override fun visitReturn(expression: IrReturn, data: Nothing?): IrExpression {
-                if (expression.returnTargetSymbol != funcSymbol) return super.visitReturn(expression, data)
-                return IrBreakImpl(expression.startOffset, expression.endOffset, context.irBuiltIns.nothingType, loop)
             }
         }, null)
     }
@@ -1088,3 +1053,5 @@ private fun effectiveCall(arg: IrExpression): Pair<IrCall, Boolean>? {
 }
 
 private fun IrElement.acceptVoid(visitor: IrVisitorVoid) = accept(visitor, null)
+
+

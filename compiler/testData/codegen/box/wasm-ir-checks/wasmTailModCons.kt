@@ -1,4 +1,5 @@
 // TARGET_BACKEND: WASM
+// ENABLE_TMC
 
 // Tail Modulo Cons: a recursive call whose result is immediately wrapped in a constructor is not
 // in tail position, so it consumes stack proportional to the recursion depth. WasmTailModConsLowering

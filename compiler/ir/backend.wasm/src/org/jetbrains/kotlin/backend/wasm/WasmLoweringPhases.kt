@@ -150,7 +150,6 @@ val wasmLowerings: List<NamedCompilerPhase<WasmBackendContext, IrModuleFragment,
 
     ::WasmTailrecLowering,
     ::WasmTailModConsLowering,
-    ::WasmSelectiveCpsLowering,
 
     ::EnumWhenLowering,
     ::EnumClassConstructorLowering,
