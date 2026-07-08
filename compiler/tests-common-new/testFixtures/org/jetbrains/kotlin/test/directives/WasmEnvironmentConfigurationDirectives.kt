@@ -34,6 +34,10 @@ object WasmEnvironmentConfigurationDirectives : SimpleDirectivesContainer() {
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect)"
     )
 
+    val ENABLE_TMC by directive(
+        description = "Enable tail-modulo-cons transformation of constructor-wrapped recursion"
+    )
+
     @OptIn(SensitiveDirectiveAPI::class)
     val WASM_IGNORE_FOR by valueDirective(
         description = """
