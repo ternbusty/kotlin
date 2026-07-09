@@ -92,10 +92,6 @@ object WasmConfigurationKeys {
     @JvmField
     val WASM_ENABLE_TAIL_CALLS = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_TAIL_CALLS")
 
-    // Enable tail-modulo-cons transformation of constructor-wrapped recursion, with selective tail-call emission for the generated helpers.
-    @JvmField
-    val WASM_ENABLE_TMC = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_TMC")
-
 }
 
 var CompilerConfiguration.wasmEnableArrayRangeChecks: Boolean
@@ -185,8 +181,4 @@ var CompilerConfiguration.wasmTestBoxFunctionToExport: FqName?
 var CompilerConfiguration.wasmEnableTailCalls: Boolean
     get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS)
     set(value) { put(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS, value) }
-
-var CompilerConfiguration.wasmEnableTmc: Boolean
-    get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_TMC)
-    set(value) { put(WasmConfigurationKeys.WASM_ENABLE_TMC, value) }
 

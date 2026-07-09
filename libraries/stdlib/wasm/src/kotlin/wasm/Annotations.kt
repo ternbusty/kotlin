@@ -55,10 +55,8 @@ public annotation class WasmExport(
  * consumed only by a constructor runs in constant stack space regardless of
  * depth.
  *
- * Honored when the `-Xwasm-enable-tmc` compiler option is given. In that mode,
- * annotating a function whose shape the transformation cannot handle is a
+ * Annotating a function whose shape the transformation cannot handle is a
  * compilation error, so the constant-stack property never degrades silently.
- * Without the option the annotation has no effect.
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.BINARY)

@@ -125,16 +125,6 @@ sealed class K2WasmCompilerArguments : CommonJsAndWasmCompilerArguments() {
         }
 
     @Argument(
-        value = "-Xwasm-enable-tmc",
-        description = "Enable tail-modulo-cons transformation of constructor-wrapped recursion.",
-    )
-    var wasmEnableTmc: Boolean = false
-        set(value) {
-            checkFrozen()
-            field = value
-        }
-
-    @Argument(
         value = "-Xwasm-generate-closed-world-multimodule",
         description = "Compile modules in multi-module closed-world mode using module passed in `-include` argument as main module",
     )

@@ -24,7 +24,6 @@ fun copyK2JSCompilerArguments(from: K2JSCompilerArguments, to: KotlinWasmCompile
     to.wasmEnableArrayRangeChecks = from.wasmEnableArrayRangeChecks
     to.wasmEnableAsserts = from.wasmEnableAsserts
     to.wasmEnableTailCalls = from.wasmEnableTailCalls
-    to.wasmEnableTmc = from.wasmEnableTmc
     to.wasmGenerateClosedWorldMultimodule = from.wasmGenerateClosedWorldMultimodule
     to.wasmGenerateWat = from.wasmGenerateWat
     to.wasmIncludedModuleOnly = from.wasmIncludedModuleOnly

@@ -1,5 +1,4 @@
 // TARGET_BACKEND: WASM
-// ENABLE_TMC
 
 // Constructor-wrapped recursion with a result-independent post-effect:
 // the pos[0]++ after the recursive call (consuming the closing bracket)

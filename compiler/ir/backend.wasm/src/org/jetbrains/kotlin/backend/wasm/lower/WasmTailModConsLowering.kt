@@ -88,10 +88,8 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     private val tmcAnnotation = FqName("kotlin.wasm.TailModCons")
 
-    private val enabled = context.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TMC) == true
 
     override fun lower(irFile: IrFile) {
-        if (!enabled) return
         val annotated = mutableListOf<IrSimpleFunction>()
         irFile.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {

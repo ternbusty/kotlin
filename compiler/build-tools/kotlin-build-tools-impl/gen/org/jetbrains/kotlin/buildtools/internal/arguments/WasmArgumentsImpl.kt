@@ -32,7 +32,6 @@ import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Co
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_ARRAY_RANGE_CHECKS
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_ASSERTS
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_TAIL_CALLS
-import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_ENABLE_TMC
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_GENERATE_DWARF
 import org.jetbrains.kotlin.buildtools.`internal`.arguments.WasmArgumentsImpl.Companion.X_WASM_GENERATE_WAT
@@ -153,7 +152,6 @@ internal class WasmArgumentsImpl(
     if (X_WASM_ENABLE_ARRAY_RANGE_CHECKS in this) { arguments.wasmEnableArrayRangeChecks = get(X_WASM_ENABLE_ARRAY_RANGE_CHECKS)}
     if (X_WASM_ENABLE_ASSERTS in this) { arguments.wasmEnableAsserts = get(X_WASM_ENABLE_ASSERTS)}
     if (X_WASM_ENABLE_TAIL_CALLS in this) { arguments.wasmEnableTailCalls = get(X_WASM_ENABLE_TAIL_CALLS)}
-    if (X_WASM_ENABLE_TMC in this) { arguments.wasmEnableTmc = get(X_WASM_ENABLE_TMC)}
     if (X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE in this) { arguments.wasmGenerateClosedWorldMultimodule = get(X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE)}
     if (X_WASM_GENERATE_DWARF in this) { arguments.generateDwarf = get(X_WASM_GENERATE_DWARF)}
     if (X_WASM_GENERATE_WAT in this) { arguments.wasmGenerateWat = get(X_WASM_GENERATE_WAT)}
@@ -185,7 +183,6 @@ internal class WasmArgumentsImpl(
     try { this[X_WASM_ENABLE_ARRAY_RANGE_CHECKS] = arguments.wasmEnableArrayRangeChecks } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_ENABLE_ASSERTS] = arguments.wasmEnableAsserts } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_ENABLE_TAIL_CALLS] = arguments.wasmEnableTailCalls } catch (_: NoSuchMethodError) {  }
-    try { this[X_WASM_ENABLE_TMC] = arguments.wasmEnableTmc } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE] = arguments.wasmGenerateClosedWorldMultimodule } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_GENERATE_DWARF] = arguments.generateDwarf } catch (_: NoSuchMethodError) {  }
     try { this[X_WASM_GENERATE_WAT] = arguments.wasmGenerateWat } catch (_: NoSuchMethodError) {  }
@@ -215,7 +212,6 @@ internal class WasmArgumentsImpl(
     if (X_WASM_ENABLE_ARRAY_RANGE_CHECKS in this) { arguments.wasmEnableArrayRangeChecks = get(X_WASM_ENABLE_ARRAY_RANGE_CHECKS)}
     if (X_WASM_ENABLE_ASSERTS in this) { arguments.wasmEnableAsserts = get(X_WASM_ENABLE_ASSERTS)}
     if (X_WASM_ENABLE_TAIL_CALLS in this) { arguments.wasmEnableTailCalls = get(X_WASM_ENABLE_TAIL_CALLS)}
-    if (X_WASM_ENABLE_TMC in this) { arguments.wasmEnableTmc = get(X_WASM_ENABLE_TMC)}
     if (X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE in this) { arguments.wasmGenerateClosedWorldMultimodule = get(X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE)}
     if (X_WASM_GENERATE_DWARF in this) { arguments.generateDwarf = get(X_WASM_GENERATE_DWARF)}
     if (X_WASM_GENERATE_WAT in this) { arguments.wasmGenerateWat = get(X_WASM_GENERATE_WAT)}
@@ -290,8 +286,6 @@ internal class WasmArgumentsImpl(
 
     public val X_WASM_ENABLE_TAIL_CALLS: WasmArgument<Boolean> =
         WasmArgument("X_WASM_ENABLE_TAIL_CALLS")
-
-    public val X_WASM_ENABLE_TMC: WasmArgument<Boolean> = WasmArgument("X_WASM_ENABLE_TMC")
 
     public val X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE: WasmArgument<Boolean> =
         WasmArgument("X_WASM_GENERATE_CLOSED_WORLD_MULTIMODULE")

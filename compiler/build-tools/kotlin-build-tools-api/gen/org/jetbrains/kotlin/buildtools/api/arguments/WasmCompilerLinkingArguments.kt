@@ -160,16 +160,6 @@ public interface WasmCompilerLinkingArguments : WasmCompilerArguments,
         WasmCompilerLinkingArgument("X_WASM_ENABLE_TAIL_CALLS", KotlinReleaseVersion(2, 4, 20))
 
     /**
-     * Enable tail-modulo-cons transformation of constructor-wrapped recursion.
-     *
-     * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.
-     */
-    @JvmField
-    @ExperimentalCompilerArgument
-    public val X_WASM_ENABLE_TMC: WasmCompilerLinkingArgument<Boolean> =
-        WasmCompilerLinkingArgument("X_WASM_ENABLE_TMC", KotlinReleaseVersion(2, 4, 20))
-
-    /**
      * Compile modules in multi-module closed-world mode using module passed in `-include` argument as main module
      *
      * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.

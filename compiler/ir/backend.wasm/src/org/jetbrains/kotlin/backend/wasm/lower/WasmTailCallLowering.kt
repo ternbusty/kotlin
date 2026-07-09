@@ -13,8 +13,6 @@ import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.types.isClassWithFqName
 import org.jetbrains.kotlin.ir.types.isUnit
-import org.jetbrains.kotlin.ir.util.isOverridable
-import org.jetbrains.kotlin.ir.backend.js.utils.realOverrideTarget
 import org.jetbrains.kotlin.ir.visitors.IrVisitor
 import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
 import org.jetbrains.kotlin.wasm.config.wasmEnableTailCalls
@@ -27,12 +25,11 @@ val WASM_TAIL_CALL by IrStatementOriginImpl
  * can emit `return_call` / `return_call_ref` without re-analysing the IR.
  *
  * With [WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS] every structurally
- * tail-positioned call is marked. With only [WasmConfigurationKeys.WASM_ENABLE_TMC]
- * marking is selective, because `return_call` prevents V8 from inlining the
- * callee into the caller: only self-recursive calls (inlining is impossible
- * anyway), calls from the TMC-generated DPS helpers (which rely on
- * `return_call` for bounded stack usage), and virtual/interface dispatch
- * (V8 never inlines through indirect calls) are marked.
+ * tail-positioned call is marked. Independently of the flag, tail calls
+ * inside TMC-generated DPS helpers ([TMC_DPS_FUNCTION] origin) are always
+ * marked, because the tail-modulo-cons transformation relies on
+ * `return_call` for bounded stack usage and its helpers only exist for
+ * functions that opted in via `@kotlin.wasm.TailModCons`.
  *
  * Must run after all lowerings that may wrap calls in blocks, try-catch, or
  * continuation machinery, so that the structural tail-position analysis sees
@@ -40,22 +37,13 @@ val WASM_TAIL_CALL by IrStatementOriginImpl
  */
 internal class WasmTailCallLowering(private val context: WasmBackendContext) : BodyLoweringPass {
     private val unrestricted = context.configuration.wasmEnableTailCalls
-    private val selective = !unrestricted &&
-            context.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TMC) == true
 
     override fun lower(irBody: IrBody, container: IrDeclaration) {
-        if (!unrestricted && !selective) return
         val irFunction = container as? IrFunction ?: return
         if (irFunction is IrConstructor) return
-        markTailCalls(irFunction, unrestricted)
+        if (!unrestricted && irFunction.origin !== TMC_DPS_FUNCTION) return
+        markTailCalls(irFunction, unrestricted = true)
     }
-}
-
-private fun isSelectivelyMarkable(call: IrCall, caller: IrFunction): Boolean {
-    if (call.symbol == caller.symbol) return true
-    if (caller.origin === TMC_DPS_FUNCTION) return true
-    val callee = call.symbol.owner.realOverrideTarget
-    return callee.isOverridable && call.superQualifierSymbol == null
 }
 
 private fun markTailCalls(irFunction: IrFunction, unrestricted: Boolean) {
@@ -109,7 +97,7 @@ private fun markTailCalls(irFunction: IrFunction, unrestricted: Boolean) {
 
         override fun visitCall(expression: IrCall, data: Boolean) {
             expression.acceptChildren(this, false)
-            if (data && (unrestricted || isSelectivelyMarkable(expression, irFunction))) {
+            if (data && unrestricted) {
                 expression.origin = WASM_TAIL_CALL
             }
         }

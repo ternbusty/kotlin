@@ -1,5 +1,9 @@
 // TARGET_BACKEND: WASM
-// ENABLE_TMC
+
+// The DPS helper's self-call must be return_call even though no tail-call
+// flag is set: the helper only exists for @TailModCons functions and relies
+// on it for bounded stack usage.
+// WASM_CHECK_INSTRUCTION_IN_FUNCTION: instruction=return_call inFunction=chain$tmcDps
 
 // Tail Modulo Cons: a recursive call whose result is immediately wrapped in a constructor is not
 // in tail position, so it consumes stack proportional to the recursion depth. WasmTailModConsLowering
