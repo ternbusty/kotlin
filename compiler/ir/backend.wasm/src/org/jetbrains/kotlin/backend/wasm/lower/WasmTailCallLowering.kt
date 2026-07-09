@@ -42,11 +42,11 @@ internal class WasmTailCallLowering(private val context: WasmBackendContext) : B
         val irFunction = container as? IrFunction ?: return
         if (irFunction is IrConstructor) return
         if (!unrestricted && irFunction.origin !== TMC_DPS_FUNCTION) return
-        markTailCalls(irFunction, unrestricted = true)
+        markTailCalls(irFunction)
     }
 }
 
-private fun markTailCalls(irFunction: IrFunction, unrestricted: Boolean) {
+private fun markTailCalls(irFunction: IrFunction) {
     val isUnitReturn = irFunction.returnType.isUnit()
 
     val visitor = object : IrVisitor<Unit, Boolean>() {
@@ -97,7 +97,7 @@ private fun markTailCalls(irFunction: IrFunction, unrestricted: Boolean) {
 
         override fun visitCall(expression: IrCall, data: Boolean) {
             expression.acceptChildren(this, false)
-            if (data && unrestricted) {
+            if (data) {
                 expression.origin = WASM_TAIL_CALL
             }
         }

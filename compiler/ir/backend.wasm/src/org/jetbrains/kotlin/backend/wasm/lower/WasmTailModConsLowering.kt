@@ -6,18 +6,12 @@
 package org.jetbrains.kotlin.backend.wasm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
-import org.jetbrains.kotlin.backend.common.lower.AbstractVariableRemapper
+import org.jetbrains.kotlin.backend.common.ir.ValueRemapper
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.wasm.utils.StronglyConnectedComponents
+import org.jetbrains.kotlin.backend.wasm.utils.hasTailModConsAnnotation
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.backend.wasm.WasmBackendErrors
-import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
-import org.jetbrains.kotlin.cli.common.messages.MessageCollector
-import org.jetbrains.kotlin.config.CommonConfigurationKeys
-import org.jetbrains.kotlin.ir.util.hasAnnotation
-import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
-import org.jetbrains.kotlin.config.MessageCollectorAccess
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrElement
@@ -27,7 +21,6 @@ import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrBlockImpl
-import org.jetbrains.kotlin.ir.expressions.impl.IrGetValueImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrReturnImpl
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
@@ -36,7 +29,6 @@ import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.types.defaultType
 import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
-import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.util.properties
@@ -50,8 +42,9 @@ import org.jetbrains.kotlin.ir.visitors.acceptVoid
 /**
  * Tail Modulo Cons (TMC) lowering for Kotlin/Wasm.
  *
- * Detects functions whose return statement wraps a recursive call inside a
- * constructor (directly or via a local variable):
+ * Rewrites functions annotated with `kotlin.wasm.TailModCons` whose return
+ * statement wraps a recursive call inside a constructor (directly or via a
+ * local variable):
  *
  *     return Ctor(c(p), f(next(p)))
  *     val v = f(next(p)); return Ctor(c(p), v)
@@ -73,30 +66,24 @@ import org.jetbrains.kotlin.ir.visitors.acceptVoid
  * flow, saved variables, and via-variable patterns without rebuilding the body
  * from scratch.
  *
- * Functions not eligible for DPS (e.g. those whose post-effects reference the
- * recursive result, or SCCs of size >= 3) are left untouched.
- *
- * Candidate detection is file-local, and the pairwise rewrite requires both
- * members in the same declaration container; mutual recursion across files or
- * containers is reported as a candidate but not transformed.
+ * The annotation is a checked contract. An annotated function that no strategy
+ * can transform (e.g. post-effects referencing the recursive result, recursion
+ * cycles larger than two functions, or cycles spanning multiple files or
+ * declaration containers) is a [WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE]
+ * compilation error, never a silent fall-through to stack-consuming recursion.
  */
 internal class WasmTailModConsLowering(private val context: WasmBackendContext) : FileLoweringPass {
 
-    @OptIn(MessageCollectorAccess::class)
-    private val messageCollector: MessageCollector? =
-        context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
-
-    private val tmcAnnotation = FqName("kotlin.wasm.TailModCons")
-
-
     override fun lower(irFile: IrFile) {
         val annotated = mutableListOf<IrSimpleFunction>()
+        // The walk must descend into bodies: local functions can carry the
+        // annotation too, and the checked contract owes them an error as well.
         irFile.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
                 element.acceptChildrenVoid(this)
             }
             override fun visitSimpleFunction(declaration: IrSimpleFunction) {
-                if (declaration.hasAnnotation(tmcAnnotation)) {
+                if (declaration.hasTailModConsAnnotation()) {
                     annotated += declaration
                 }
                 declaration.acceptChildrenVoid(this)
@@ -116,7 +103,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val transformed = mutableSetOf<IrSimpleFunction>()
 
         // DPS-loop runs first: for functions matching the iterative-rec shape where
-        // post-effects don't reference savedVars or the recursive result, use
+        // post-effects reference neither the pre-loop variables nor the recursive result, use
         // destination-passing style with mutable struct fields inside a while(true) loop.
         // The loop allocates a cell, fills the previous hole (dst.field = cell),
         // advances dst, and re-evaluates the branch condition.  At the base case the
@@ -128,17 +115,16 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
-        // Only calls to functions of this file can form transformable cycles, so
-        // gate normalization and site collection on file-local callees to avoid
-        // churning IR that can never become a candidate.
-        val fileFunctions = allFunctions.toHashSet()
-
+        // `return when/if` bodies are normalised into per-branch returns so that
+        // constructor-wrapping returns inside branches are detected. Annotated
+        // functions that still end up untransformed are a compilation error, so
+        // normalising unconditionally never churns IR that ships.
         for (f in allFunctions) {
-            if (f in transformed) continue
-            if (hasReturnWhenWithCtorCall(f, fileFunctions)) {
-                normalizeReturnWhen(f)
-            }
+            if (f !in transformed) normalizeReturnWhen(f)
         }
+
+        // Only calls to functions of this file can form transformable cycles.
+        val fileFunctions = allFunctions.toHashSet()
 
         // Collect TMC sites per function and build edges (caller -> callee) within the file.
         val sitesByFunc = mutableMapOf<IrSimpleFunction, List<TmcSite>>()
@@ -148,55 +134,22 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             if (sites.isNotEmpty()) sitesByFunc[f] = sites
         }
 
-        var sccs: List<List<IrSimpleFunction>> = emptyList()
-        if (sitesByFunc.isNotEmpty()) {
-            val candidateSet = sitesByFunc.keys
-            val edges: Map<IrSimpleFunction, List<IrSimpleFunction>> = sitesByFunc.mapValues { entry ->
-                entry.value.mapNotNull { s ->
-                    val callee = s.recursiveCall.symbol.owner
-                    if (callee in candidateSet) callee else null
-                }.distinct()
-            }
-            sccs = computeSccs(candidateSet.toList(), edges)
+        val edges: Map<IrSimpleFunction, List<IrSimpleFunction>> = sitesByFunc.mapValues { entry ->
+            entry.value.mapNotNull { s ->
+                val callee = s.recursiveCall.symbol.owner
+                if (callee in sitesByFunc) callee else null
+            }.distinct()
+        }
+        val sccs = computeSccs(sitesByFunc.keys.toList(), edges)
 
-            val mc = messageCollector
-            val nonTrivialSccs = sccs.filter { it.size >= 2 }
-            if (mc != null && nonTrivialSccs.isNotEmpty()) {
-                mc.report(
-                    CompilerMessageSeverity.STRONG_WARNING,
-                    "[wasm-tmc] file=${irFile.fileEntry.name} non-trivial SCCs: ${nonTrivialSccs.size}",
-                )
-                for (scc in nonTrivialSccs) {
-                    val members = scc.joinToString(", ") { it.fqNameWhenAvailable?.asString() ?: it.name.asString() }
-                    mc.report(CompilerMessageSeverity.STRONG_WARNING, "[wasm-tmc]   SCC of ${scc.size}: $members")
+        for (scc in sccs) {
+            when (scc.size) {
+                1 -> {
+                    val f = scc.single()
+                    val selfSite = sitesByFunc.getValue(f).firstOrNull { it.recursiveCall.symbol == f.symbol }
+                    if (selfSite != null && trySelfRecDpsTransform(f, selfSite)) transformed += f
                 }
-            }
-
-            for (scc in sccs) {
-                when {
-                    scc.size == 1 -> {
-                        val f = scc.single()
-                        val sites = sitesByFunc[f]!!
-                        val selfSite = sites.firstOrNull { it.recursiveCall.symbol == f.symbol }
-                        if (selfSite != null) {
-                            val ok = trySelfRecDpsTransform(f, selfSite)
-                            reportSites(f, sites, ok)
-                            if (ok) transformed += f
-                        } else {
-                            reportSites(f, sites, transformed = false)
-                        }
-                    }
-                    scc.size == 2 -> {
-                        val ok = tryPairwiseMutualRecTransform(scc, sitesByFunc)
-                        for (f in scc) {
-                            reportSites(f, sitesByFunc[f]!!, ok)
-                            if (ok) transformed += f
-                        }
-                    }
-                    else -> {
-                        for (f in scc) reportSites(f, sitesByFunc[f]!!, transformed = false)
-                    }
-                }
+                2 -> if (tryPairwiseMutualRecTransform(scc, sitesByFunc)) transformed += scc
             }
         }
 
@@ -222,38 +175,30 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             .report(WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE, reason)
     }
 
-    private fun reportSites(func: IrSimpleFunction, sites: List<TmcSite>, transformed: Boolean) {
-        val mc = messageCollector ?: return
-        val fqn = func.fqNameWhenAvailable?.asString() ?: func.name.asString()
-        val severity = if (transformed) CompilerMessageSeverity.STRONG_WARNING else CompilerMessageSeverity.INFO
-        val tag = if (transformed) "transformed" else "candidate"
-        for (s in sites) {
-            val callee = s.recursiveCall.symbol.owner.name.asString()
-            val ctor = s.ctorCall.symbol.owner.parentClassOrNull?.name?.asString() ?: "?"
-            val viaVar = if (s.viaLocalVariable) " (via local var)" else ""
-            val selfFlag = if (s.recursiveCall.symbol == func.symbol) " (SELF-RECURSE)" else ""
-            mc.report(severity, "[wasm-tmc] $tag: $fqn -> $callee, wrapped in $ctor$viaVar$selfFlag")
-        }
-    }
-
     // -------------------------------------------------------------- self-rec (DPS, body-transforming)
 
-    private fun trySelfRecDpsTransform(func: IrSimpleFunction, site: TmcSite): Boolean {
-        val ctorClass = site.ctorCall.symbol.owner.parentClassOrNull ?: return false
-        val recField = findRecursiveBackingField(site.ctorCall, site.recursiveArgIndex) ?: return false
-        val container = func.parent as? IrDeclarationContainer ?: return false
-        val ctorParams = site.ctorCall.symbol.owner.parameters
-        val recParam = ctorParams.getOrNull(site.recursiveArgIndex) ?: return false
-        if (recParam.type.classifierOrFail != func.returnType.classifierOrFail) return false
+    /** Everything a DPS rewrite needs from an eligible [site]; null when the site is not eligible. */
+    private class DpsPrep(val ctorClass: IrClass, val recField: IrField, val bodyCopy: IrBlockBody)
 
-        val bodyCopy = (func.body as? IrBlockBody ?: return false).deepCopyWithSymbols()
+    private fun prepareDps(func: IrSimpleFunction, site: TmcSite): DpsPrep? {
+        val ctorClass = site.ctorCall.symbol.owner.parentClassOrNull ?: return null
+        val recParam = site.ctorCall.symbol.owner.parameters.getOrNull(site.recursiveArgIndex) ?: return null
+        if (recParam.type.classifierOrFail != func.returnType.classifierOrFail) return null
+        val recField = findRecursiveBackingField(site.ctorCall, site.recursiveArgIndex) ?: return null
+        val bodyCopy = (func.body as? IrBlockBody ?: return null).deepCopyWithSymbols()
+        return DpsPrep(ctorClass, recField, bodyCopy)
+    }
+
+    private fun trySelfRecDpsTransform(func: IrSimpleFunction, site: TmcSite): Boolean {
+        val container = func.parent as? IrDeclarationContainer ?: return false
+        val prep = prepareDps(func, site) ?: return false
 
         val fDps = context.irFactory.stageController.restrictTo(func) {
-            createDpsSibling(container, func, dstType = ctorClass.defaultTypeNullable())
+            createDpsSibling(container, func, dstType = prep.ctorClass.defaultTypeNullable())
         }
 
         transformOriginalBodyInPlace(func, site, fDps)
-        buildDpsBodyFromCopy(fDps, func, bodyCopy, site, recField)
+        buildDpsBodyFromCopy(fDps, func, prep.bodyCopy, site, prep.recField)
         return true
     }
 
@@ -383,44 +328,6 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     // -------------------------------------------------------------- return-when normalization
 
-    private fun hasReturnWhenWithCtorCall(func: IrSimpleFunction, candidates: Set<IrSimpleFunction>): Boolean {
-        val funcSymbol = func.symbol
-        var found = false
-        func.body?.acceptVoid(object : IrVisitorVoid() {
-            override fun visitElement(element: IrElement) {
-                if (!found) element.acceptChildrenVoid(this)
-            }
-            override fun visitFunction(declaration: IrFunction) {}
-            override fun visitReturn(expression: IrReturn) {
-                if (found) return
-                if (expression.returnTargetSymbol != funcSymbol) {
-                    expression.acceptChildrenVoid(this)
-                    return
-                }
-                val value = expression.value
-                if (value is IrWhen) {
-                    for (branch in value.branches) {
-                        if (branchHasCtorWithCall(branch.result, candidates)) {
-                            found = true
-                            return
-                        }
-                    }
-                }
-            }
-        })
-        return found
-    }
-
-    private fun branchHasCtorWithCall(expr: IrExpression, candidates: Set<IrSimpleFunction>): Boolean = when (expr) {
-        is IrConstructorCall -> expr.arguments.any { it is IrCall && it.symbol.owner in candidates }
-        is IrBlock -> {
-            val last = expr.statements.lastOrNull()
-            last is IrConstructorCall && last.arguments.any { it is IrCall && it.symbol.owner in candidates }
-        }
-        is IrWhen -> expr.branches.any { branchHasCtorWithCall(it.result, candidates) }
-        else -> false
-    }
-
     private fun normalizeReturnWhen(func: IrSimpleFunction) {
         val body = func.body as? IrBlockBody ?: return
         val funcSymbol = func.symbol
@@ -485,33 +392,20 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val container = a.parent as? IrDeclarationContainer ?: return false
         if (b.parent !== container) return false
 
-        val aCtorClass = siteA.ctorCall.symbol.owner.parentClassOrNull ?: return false
-        val bCtorClass = siteB.ctorCall.symbol.owner.parentClassOrNull ?: return false
-
-        val aCtorParams = siteA.ctorCall.symbol.owner.parameters
-        val aRecParam = aCtorParams.getOrNull(siteA.recursiveArgIndex) ?: return false
-        if (aRecParam.type.classifierOrFail != a.returnType.classifierOrFail) return false
-        val bCtorParams = siteB.ctorCall.symbol.owner.parameters
-        val bRecParam = bCtorParams.getOrNull(siteB.recursiveArgIndex) ?: return false
-        if (bRecParam.type.classifierOrFail != b.returnType.classifierOrFail) return false
-
-        val aRecField = findRecursiveBackingField(siteA.ctorCall, siteA.recursiveArgIndex) ?: return false
-        val bRecField = findRecursiveBackingField(siteB.ctorCall, siteB.recursiveArgIndex) ?: return false
-
-        val bodyCopyA = (a.body as? IrBlockBody ?: return false).deepCopyWithSymbols()
-        val bodyCopyB = (b.body as? IrBlockBody ?: return false).deepCopyWithSymbols()
+        val prepA = prepareDps(a, siteA) ?: return false
+        val prepB = prepareDps(b, siteB) ?: return false
 
         val aDps = context.irFactory.stageController.restrictTo(a) {
-            createDpsSibling(container, a, dstType = bCtorClass.defaultTypeNullable())
+            createDpsSibling(container, a, dstType = prepB.ctorClass.defaultTypeNullable())
         }
         val bDps = context.irFactory.stageController.restrictTo(b) {
-            createDpsSibling(container, b, dstType = aCtorClass.defaultTypeNullable())
+            createDpsSibling(container, b, dstType = prepA.ctorClass.defaultTypeNullable())
         }
 
         transformOriginalBodyInPlace(a, siteA, bDps)
         transformOriginalBodyInPlace(b, siteB, aDps)
-        buildDpsBodyFromCopy(aDps, a, bodyCopyA, siteA, bRecField, calleeSymbol = b.symbol, peerDps = bDps)
-        buildDpsBodyFromCopy(bDps, b, bodyCopyB, siteB, aRecField, calleeSymbol = a.symbol, peerDps = aDps)
+        buildDpsBodyFromCopy(aDps, a, prepA.bodyCopy, siteA, prepB.recField, calleeSymbol = b.symbol, peerDps = bDps)
+        buildDpsBodyFromCopy(bDps, b, prepB.bodyCopy, siteB, prepA.recField, calleeSymbol = a.symbol, peerDps = aDps)
 
         return true
     }
@@ -532,6 +426,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         dstType: IrType,
     ): IrSimpleFunction {
         return context.irFactory.addFunction(container) {
+            // The "$tmcDps" suffix is asserted by wasm-ir-checks testdata (WASM_CHECK_INSTRUCTION_IN_FUNCTION).
             name = Name.identifier(original.name.asString() + "\$tmcDps")
             visibility = DescriptorVisibilities.PRIVATE
             modality = Modality.FINAL
@@ -618,13 +513,9 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     private fun tryDpsLoopTransform(func: IrSimpleFunction): Boolean {
         val m = matchIterativeRecShape(func) ?: return false
-        if (m.savedVars.isNotEmpty()) {
-            for (sv in m.savedVars) {
-                if (referencesSymbol(m.recPostEffects, sv.symbol)) return false
-            }
-        }
         if (m.recPostEffects.isEmpty()) return false
         if (referencesSymbol(m.recPostEffects, m.recCallVar.symbol)) return false
+        if (m.preVars.any { referencesSymbol(m.recPostEffects, it.symbol) }) return false
 
         val ctorCall = m.recFinalExpr as? IrConstructorCall ?: return false
         val recArgIndex = ctorCall.arguments.indexOfFirst { arg ->
@@ -636,19 +527,8 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val recParam = ctorParams.getOrNull(recArgIndex) ?: return false
         if (recParam.type.classifierOrFail != func.returnType.classifierOrFail) return false
         val recField = findRecursiveBackingField(ctorCall, recArgIndex) ?: return false
-        val retVal = m.returnStmt.value
-        if (retVal !is IrGetValue || retVal.symbol != m.resultVar.symbol) return false
-        val body = func.body as IrBlockBody
-        val stmts = body.statements
-        val resultVarIdx = stmts.indexOf(m.resultVar)
-        if (resultVarIdx < 0 || resultVarIdx + 1 != stmts.size - 1) return false
 
         buildDpsLoopBody(func, m, ctorCall, recArgIndex, ctorClass, recField)
-
-        messageCollector?.report(
-            CompilerMessageSeverity.STRONG_WARNING,
-            "[wasm-tmc] DPS-loop transformed: ${func.fqNameWhenAvailable ?: func.name}",
-        )
         return true
     }
 
@@ -813,9 +693,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val wrapper = IrBlockImpl(0, 0, context.irBuiltIns.unitType)
         wrapper.statements.addAll(stmts)
         val copy = wrapper.deepCopyWithSymbols() as IrBlock
-        for (stmt in copy.statements) {
-            remapSymbols(stmt, paramMapping)
-        }
+        remapSymbols(copy, paramMapping)
         return copy.statements
     }
 
@@ -846,15 +724,12 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     private data class IterativeRecMatch(
         val earlyReturnWhens: List<IrWhen>,
         val preVars: List<IrVariable>,
-        val resultVar: IrVariable,
         val recursiveBranchCondition: IrExpression,
         val recPreEffects: List<IrStatement>,
         val recCallVar: IrVariable,
         val recPostEffects: List<IrStatement>,
         val recFinalExpr: IrExpression,
         val baseBranches: List<IrBranch>,
-        val returnStmt: IrReturn,
-        val savedVars: List<IrVariable>,
     )
 
     private fun countSelfCalls(func: IrSimpleFunction): Int {
@@ -874,7 +749,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     }
 
     private fun matchIterativeRecShape(func: IrSimpleFunction): IterativeRecMatch? {
-        // Cheap structural rejections first; the self-call count needs a body traversal.
+        // Cheap structural rejections first; the self-call count at the end needs a body traversal.
         val body = func.body as? IrBlockBody ?: return null
         val stmts = body.statements
         if (stmts.size < 2) return null
@@ -882,16 +757,12 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val returnStmt = stmts.last() as? IrReturn ?: return null
         if (returnStmt.returnTargetSymbol != func.symbol) return null
 
-        var resultVarIdx = -1
-        for (i in stmts.size - 2 downTo 0) {
-            val v = stmts[i] as? IrVariable ?: continue
-            if (v.initializer is IrWhen) { resultVarIdx = i; break }
-        }
-        if (resultVarIdx < 0) return null
-        if (countSelfCalls(func) != 1) return null
-
-        val resultVar = stmts[resultVarIdx] as IrVariable
-        val whenExpr = resultVar.initializer as IrWhen
+        // The result variable must directly precede the trailing return, which must read it.
+        val resultVarIdx = stmts.size - 2
+        val resultVar = stmts[resultVarIdx] as? IrVariable ?: return null
+        val whenExpr = resultVar.initializer as? IrWhen ?: return null
+        val retVal = returnStmt.value
+        if (retVal !is IrGetValue || retVal.symbol != resultVar.symbol) return null
 
         var recBranchIdx = -1
         var matchedRecCallVar: IrVariable? = null
@@ -926,6 +797,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         }
 
         if (recBranchIdx < 0 || matchedRecFinalExpr == null) return null
+        if (countSelfCalls(func) != 1) return null
 
         val allPreStmts = if (resultVarIdx > 0) stmts.subList(0, resultVarIdx).toList() else emptyList()
         val baseBranches = whenExpr.branches.filterIndexed { i, _ -> i != recBranchIdx }
@@ -943,47 +815,27 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
-        val postSymbols = mutableSetOf<IrValueSymbol>()
-        val postRegion = matchedPostEffects!! + listOf(matchedRecFinalExpr) +
-                stmts.subList(resultVarIdx + 1, stmts.size)
-        for (element in postRegion) {
-            element.acceptVoid(object : IrVisitorVoid() {
-                override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
-                override fun visitGetValue(expression: IrGetValue) {
-                    postSymbols += expression.symbol
-                }
-            })
-        }
-
-        val savedVars = preVars.filter { it.symbol in postSymbols }
-
         return IterativeRecMatch(
             earlyReturnWhens = earlyReturnWhens,
             preVars = preVars,
-            resultVar = resultVar,
             recursiveBranchCondition = whenExpr.branches[recBranchIdx].condition,
             recPreEffects = matchedPreEffects!!,
             recCallVar = matchedRecCallVar!!,
-            recPostEffects = matchedPostEffects,
+            recPostEffects = matchedPostEffects!!,
             recFinalExpr = matchedRecFinalExpr,
             baseBranches = baseBranches,
-            returnStmt = returnStmt,
-            savedVars = savedVars,
         )
     }
 
-
     private fun remapSymbols(element: IrElement, mapping: Map<IrValueSymbol, IrValueSymbol>) {
         if (mapping.isEmpty()) return
-        element.transform(object : AbstractVariableRemapper() {
-            override fun remapVariable(value: IrValueDeclaration): IrValueDeclaration? = mapping[value.symbol]?.owner
-        }, null)
+        element.transform(ValueRemapper(mapping), null)
     }
 
     private inline fun <reified T : IrElement> T.copyRemapped(mapping: Map<IrValueSymbol, IrValueSymbol>): T {
         val copy = deepCopyWithSymbols()
-        remapSymbols(copy, mapping)
-        return copy
+        if (mapping.isEmpty()) return copy
+        return copy.transform(ValueRemapper(mapping), null) as T
     }
 
 }
@@ -1010,6 +862,4 @@ private fun effectiveCall(arg: IrExpression): Pair<IrCall, Boolean>? {
     }
     return null
 }
-
-
 
