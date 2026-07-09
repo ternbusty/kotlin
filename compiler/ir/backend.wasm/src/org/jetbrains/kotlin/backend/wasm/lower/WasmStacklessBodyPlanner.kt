@@ -188,6 +188,12 @@ internal class BodyPlan(
     val entry: BlockPlan get() = blocks.first()
 }
 
+/** Result of [WasmStacklessBodyPlanner.plan]: a usable plan, or the reason there is none. */
+internal sealed class PlanResult {
+    class Planned(val plan: BodyPlan) : PlanResult()
+    class Bailed(val reason: String) : PlanResult()
+}
+
 /** Thrown internally to abandon planning for one override (bail out to native). */
 internal class BailOut(val reason: String) : RuntimeException()
 internal class LoopFrame(val loop: IrLoop, val head: BlockPlan, val exit: BlockPlan)
@@ -215,10 +221,6 @@ internal class WasmStacklessBodyPlanner(
     private val bodyToPlan: IrBlockBody,
     private val isTarget: (IrCall) -> Boolean,
 ) {
-    /** Why the last plan() returned null; for the lowerings' bail-out reporting. */
-    var lastBailReason: String = ""
-        private set
-
     private val blocks = mutableListOf<BlockPlan>()
     private val locals = mutableListOf<IrVariable>()
     private val loopStack = ArrayDeque<LoopFrame>()
@@ -231,7 +233,7 @@ internal class WasmStacklessBodyPlanner(
 
     private fun newBlock(): BlockPlan = BlockPlan().also { blocks += it }
 
-    fun plan(): BodyPlan? {
+    fun plan(): PlanResult {
         return try {
             inlineLocalFunsWithTargetCalls(bodyToPlan)
             val entry = newBlock()
@@ -242,10 +244,9 @@ internal class WasmStacklessBodyPlanner(
             if (last.terminator == null) {
                 last.terminator = Terminator.Ret(unreachableDefault())
             }
-            BodyPlan(OverrideInfo(func.parent as? IrClass, func), blocks, locals)
+            PlanResult.Planned(BodyPlan(OverrideInfo(func.parent as? IrClass, func), blocks, locals))
         } catch (b: BailOut) {
-            lastBailReason = b.reason
-            null
+            PlanResult.Bailed(b.reason)
         }
     }
 
