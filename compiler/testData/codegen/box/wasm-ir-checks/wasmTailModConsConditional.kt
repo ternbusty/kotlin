@@ -9,10 +9,13 @@
 // the base case, which is valid because they reference neither the
 // recursive result nor any saved variable.
 
+import kotlin.wasm.TailModCons
+
 sealed class Type
 class Named(val name: String) : Type()
 class ListType(val inner: Type) : Type()
 
+@TailModCons
 fun parseType(tokens: Array<String>, pos: IntArray): Type {
     if (pos[0] >= tokens.size) return Named("void")
     val type = if (tokens[pos[0]] == "[") {

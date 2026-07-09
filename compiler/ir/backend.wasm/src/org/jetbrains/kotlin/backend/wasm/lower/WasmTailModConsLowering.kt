@@ -10,9 +10,12 @@ import org.jetbrains.kotlin.backend.common.lower.AbstractVariableRemapper
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.wasm.utils.StronglyConnectedComponents
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
+import org.jetbrains.kotlin.backend.wasm.WasmBackendErrors
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
+import org.jetbrains.kotlin.ir.util.hasAnnotation
+import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
 import org.jetbrains.kotlin.config.MessageCollectorAccess
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
@@ -83,22 +86,34 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     private val messageCollector: MessageCollector? =
         context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
 
+    private val tmcAnnotation = FqName("kotlin.wasm.TailModCons")
+
     private val enabled = context.configuration.get(WasmConfigurationKeys.WASM_ENABLE_TMC) == true
 
     override fun lower(irFile: IrFile) {
         if (!enabled) return
-        val allFunctions = mutableListOf<IrSimpleFunction>()
+        val annotated = mutableListOf<IrSimpleFunction>()
         irFile.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
                 element.acceptChildrenVoid(this)
             }
             override fun visitSimpleFunction(declaration: IrSimpleFunction) {
-                if (!declaration.isTailrec && declaration.body is IrBlockBody) {
-                    allFunctions += declaration
+                if (declaration.hasAnnotation(tmcAnnotation)) {
+                    annotated += declaration
                 }
                 declaration.acceptChildrenVoid(this)
             }
         })
+        if (annotated.isEmpty()) return
+
+        val allFunctions = mutableListOf<IrSimpleFunction>()
+        for (f in annotated) {
+            when {
+                f.isTailrec -> reportNotApplicable(irFile, f, "the function is already tailrec; the annotation has no effect there")
+                f.body !is IrBlockBody -> reportNotApplicable(irFile, f, "the function has no block body")
+                else -> allFunctions += f
+            }
+        }
 
         val transformed = mutableSetOf<IrSimpleFunction>()
 
@@ -135,6 +150,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             if (sites.isNotEmpty()) sitesByFunc[f] = sites
         }
 
+        var sccs: List<List<IrSimpleFunction>> = emptyList()
         if (sitesByFunc.isNotEmpty()) {
             val candidateSet = sitesByFunc.keys
             val edges: Map<IrSimpleFunction, List<IrSimpleFunction>> = sitesByFunc.mapValues { entry ->
@@ -143,7 +159,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                     if (callee in candidateSet) callee else null
                 }.distinct()
             }
-            val sccs = computeSccs(candidateSet.toList(), edges)
+            sccs = computeSccs(candidateSet.toList(), edges)
 
             val mc = messageCollector
             val nonTrivialSccs = sccs.filter { it.size >= 2 }
@@ -186,6 +202,26 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
+        // The annotation is a checked contract: an annotated function that the
+        // transformation cannot handle is a compilation error, never a silent
+        // fall-through to stack-consuming recursion.
+        for (f in allFunctions) {
+            if (f in transformed) continue
+            val reason = when {
+                f !in sitesByFunc -> "no recursive call wrapped in a constructor was found " +
+                        "(for mutual recursion, every function in the cycle needs the annotation)"
+                sitesByFunc.getValue(f).none { it.recursiveCall.symbol == f.symbol } &&
+                        sccs.none { f in it && it.size == 2 } ->
+                    "the recursion cycle through this function is larger than two functions, which is not supported yet"
+                else -> "the function's shape is not supported by the transformation"
+            }
+            reportNotApplicable(irFile, f, reason)
+        }
+    }
+
+    private fun reportNotApplicable(irFile: IrFile, func: IrSimpleFunction, reason: String) {
+        context.diagnosticReporter.at(func, irFile)
+            .report(WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE, reason)
     }
 
     private fun reportSites(func: IrSimpleFunction, sites: List<TmcSite>, transformed: Boolean) {

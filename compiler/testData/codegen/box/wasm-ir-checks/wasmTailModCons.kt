@@ -7,9 +7,12 @@
 // run in constant stack. At depth 500_000 these patterns would overflow the host stack without the
 // transform.
 
+import kotlin.wasm.TailModCons
+
 class Cell(val value: Int, val next: Cell?)
 
 // Single-function self recursion: `return Cell(n, chain(n - 1))`.
+@TailModCons
 fun chain(n: Int): Cell? {
     if (n == 0) return null
     return Cell(n, chain(n - 1))
@@ -20,11 +23,13 @@ class ConsA(val head: Int, val tail: IList?) : IList
 class ConsB(val head: Int, val tail: IList?) : IList
 
 // Two-function mutual recursion, each wrapping the other's result in a constructor.
+@TailModCons
 fun mutualA(n: Int): IList? {
     if (n == 0) return null
     return ConsA(n, mutualB(n - 1))
 }
 
+@TailModCons
 fun mutualB(n: Int): IList? {
     if (n == 0) return null
     return ConsB(n, mutualA(n - 1))
@@ -33,6 +38,7 @@ fun mutualB(n: Int): IList? {
 // Multi-parameter with 3-arg constructor and non-Int types.
 class Triple(val tag: String, val value: Int, val next: Triple?)
 
+@TailModCons
 fun buildTriple(tag: String, n: Int): Triple? {
     if (n == 0) return null
     return Triple(tag, n, buildTriple(tag, n - 1))
@@ -41,6 +47,7 @@ fun buildTriple(tag: String, n: Int): Triple? {
 // Recursive arg NOT at the last position (first arg is recursive).
 class RevCell(val prev: RevCell?, val value: Int)
 
+@TailModCons
 fun revChain(n: Int): RevCell? {
     if (n == 0) return null
     return RevCell(revChain(n - 1), n)
@@ -50,6 +57,7 @@ fun revChain(n: Int): RevCell? {
 // The body structure is: [IrWhen, IrVariable, IrReturn Ctor(var, ..., recCall)].
 class Computed(val hash: Int, val next: Computed?)
 
+@TailModCons
 fun buildComputed(n: Int): Computed? {
     if (n == 0) return null
     val hash = n * 31 + 17
@@ -59,6 +67,7 @@ fun buildComputed(n: Int): Computed? {
 // Via-variable pattern: the recursive call is stored in a local before the constructor.
 class ViaVar(val value: Int, val next: ViaVar?)
 
+@TailModCons
 fun buildViaVar(n: Int): ViaVar? {
     if (n == 0) return null
     val child = buildViaVar(n - 1)
@@ -69,6 +78,7 @@ fun buildViaVar(n: Int): ViaVar? {
 // normalizeReturnWhen distributes the return into each branch.
 class WhenCell(val value: Int, val next: WhenCell?)
 
+@TailModCons
 fun buildWhenList(n: Int): WhenCell? = when {
     n <= 0 -> null
     else -> WhenCell(n, buildWhenList(n - 1))
@@ -77,6 +87,7 @@ fun buildWhenList(n: Int): WhenCell? = when {
 // Expression-body `return if (...) ... else ...` with saved variable.
 class IfCell(val label: Int, val next: IfCell?)
 
+@TailModCons
 fun buildIfList(n: Int): IfCell? {
     val label = n * 7 + 3
     return if (n <= 0) null else IfCell(label, buildIfList(n - 1))
