@@ -49,6 +49,11 @@ import org.jetbrains.kotlin.ir.visitors.acceptVoid
  *     return Ctor(c(p), f(next(p)))
  *     val v = f(next(p)); return Ctor(c(p), v)
  *
+ * or combines it with an associative Int/Long operator (the TRMC accumulator
+ * instance; self-recursion only, see [tryAccumulatorTransform]):
+ *
+ *     return c(p) + f(next(p))
+ *
  * `return when/if { ... }` expressions are first normalised into per-branch
  * returns so that constructor-wrapping returns inside branches are detected.
  *
@@ -123,6 +128,13 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             if (f !in transformed) normalizeReturnWhen(f)
         }
 
+        // Accumulator form: `return g op self(...)` where op is an associative
+        // Int/Long operator. Self-recursion only; runs before the constructor
+        // forms because its shape is disjoint from theirs.
+        for (f in allFunctions) {
+            if (f !in transformed && tryAccumulatorTransform(f)) transformed += f
+        }
+
         // Only calls to functions of this file can form transformable cycles.
         val fileFunctions = allFunctions.toHashSet()
 
@@ -159,7 +171,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         for (f in allFunctions) {
             if (f in transformed) continue
             val reason = when {
-                f !in sitesByFunc -> "no recursive call wrapped in a constructor was found " +
+                f !in sitesByFunc -> "no recursive call wrapped in a constructor or an associative Int/Long operation was found " +
                         "(for mutual recursion, every function in the cycle needs the annotation)"
                 sitesByFunc.getValue(f).none { it.recursiveCall.symbol == f.symbol } &&
                         sccs.none { f in it && it.size == 2 } ->
@@ -370,6 +382,234 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                 }
             }
         }, null)
+    }
+
+    // -------------------------------------------------------------- accumulator (associative op)
+
+    /**
+     * A `return <other> op self(...)` site (or its mirror image). All whitelisted
+     * operators are associative AND commutative on Int/Long, so the accumulated
+     * fold is bit-identical to the original nested evaluation, including
+     * wrap-around overflow.
+     */
+    private class AccumSite(
+        val returnExpr: IrReturn,
+        val opCall: IrCall,
+        val recursiveCall: IrCall,
+        val recOnRight: Boolean,
+    )
+
+    private val accumOpNames = setOf("plus", "times", "and", "or", "xor")
+
+    /** True for `Int.plus(Int)`-shaped intrinsics whose receiver, operand, and result all are [classifier]. */
+    private fun isAccumOp(call: IrCall, classifier: Any?): Boolean {
+        val owner = call.symbol.owner
+        if (owner.name.asString() !in accumOpNames) return false
+        val parentClass = owner.parentClassOrNull ?: return false
+        if (parentClass.symbol != context.irBuiltIns.intClass && parentClass.symbol != context.irBuiltIns.longClass) return false
+        if (owner.parameters.size != 2) return false
+        return owner.returnType.classifierOrFail == classifier &&
+                owner.parameters.all { it.type.classifierOrFail == classifier }
+    }
+
+    /**
+     * The other operand of a left-recursive site is evaluated before the recursion in the
+     * transformed code but after it in the original, so it must be order-insensitive.
+     */
+    private fun isPureOperand(expr: IrExpression): Boolean =
+        expr is IrConst || (expr is IrGetValue && expr.symbol.owner is IrValueParameter)
+
+    /**
+     * Collects `return <g> op self(...)` sites. Returns null when the function does not
+     * fit the accumulator shape: a differing operator between sites, a self-call outside
+     * a site, an impure operand next to a left-positioned recursion, a try block, or a
+     * non-Int/Long return type.
+     */
+    private fun collectAccumSites(func: IrSimpleFunction): List<AccumSite>? {
+        val classifier = func.returnType.classifierOrFail
+        if (classifier != context.irBuiltIns.intClass && classifier != context.irBuiltIns.longClass) return null
+
+        val selfSymbol = func.symbol
+        val sites = mutableListOf<AccumSite>()
+        var totalSelfCalls = 0
+        var sawTry = false
+
+        func.body?.acceptVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+            override fun visitFunction(declaration: IrFunction) {}
+            override fun visitClass(declaration: IrClass) {}
+            override fun visitTry(aTry: IrTry) {
+                sawTry = true
+            }
+
+            override fun visitCall(expression: IrCall) {
+                if (expression.symbol == selfSymbol) totalSelfCalls++
+                super.visitCall(expression)
+            }
+
+            override fun visitReturn(expression: IrReturn) {
+                if (expression.returnTargetSymbol == selfSymbol) {
+                    val value = expression.value
+                    if (value is IrCall && isAccumOp(value, classifier)) {
+                        val lhs = value.arguments[0]
+                        val rhs = value.arguments[1]
+                        when {
+                            rhs is IrCall && rhs.symbol == selfSymbol ->
+                                sites += AccumSite(expression, value, rhs, recOnRight = true)
+                            lhs is IrCall && lhs.symbol == selfSymbol && rhs != null && isPureOperand(rhs) ->
+                                sites += AccumSite(expression, value, lhs, recOnRight = false)
+                        }
+                    }
+                }
+                super.visitReturn(expression)
+            }
+        })
+
+        if (sawTry || sites.isEmpty()) return null
+        // Every self-call must be the recursion operand of exactly one site; a self-call
+        // in any other position (base-case value, condition, site operand) disqualifies.
+        if (totalSelfCalls != sites.size) return null
+        // A single accumulator can only track a single operator.
+        if (sites.map { it.opCall.symbol }.distinct().size != 1) return null
+        return sites
+    }
+
+    /**
+     * Rewrites `f` with `return g op f(...)` sites into an accumulator-passing sibling:
+     *
+     *     f(args)            = base? b : f$tmcAcc(args', g)
+     *     f$tmcAcc(args, acc) = base? acc op b : f$tmcAcc(args', acc op g)
+     *
+     * The seeded entry keeps the operator identity-free, and associativity plus
+     * commutativity of the whitelisted operators make the left fold equal to the
+     * original right fold. The sibling's self-call is in tail position and its
+     * [TMC_DPS_FUNCTION] origin makes [WasmTailCallLowering] mark it for `return_call`.
+     */
+    private fun tryAccumulatorTransform(func: IrSimpleFunction): Boolean {
+        val container = func.parent as? IrDeclarationContainer ?: return false
+        val sites = collectAccumSites(func) ?: return false
+        val opSymbol = sites.first().opCall.symbol
+        val accType = func.returnType
+        val bodyCopy = (func.body as? IrBlockBody ?: return false).deepCopyWithSymbols()
+
+        val fAcc = context.irFactory.stageController.restrictTo(func) {
+            context.irFactory.addFunction(container) {
+                // The "$tmcAcc" suffix is asserted by wasm-ir-checks testdata (WASM_CHECK_INSTRUCTION_IN_FUNCTION).
+                name = Name.identifier(func.name.asString() + "\$tmcAcc")
+                visibility = DescriptorVisibilities.PRIVATE
+                modality = Modality.FINAL
+                returnType = accType
+                origin = TMC_DPS_FUNCTION
+                startOffset = func.startOffset
+                endOffset = func.endOffset
+            }.apply {
+                // Parameter order must match the original so call sites copy arguments positionally.
+                for (origParam in func.parameters) {
+                    addValueParameter(origParam.name, origParam.type)
+                }
+                addValueParameter("\$tmcAcc", accType)
+            }
+        }
+
+        buildAccBodyFromCopy(fAcc, func, bodyCopy, opSymbol)
+        transformAccOriginalInPlace(func, sites, fAcc)
+        return true
+    }
+
+    private fun transformAccOriginalInPlace(
+        func: IrSimpleFunction,
+        sites: List<AccumSite>,
+        fAcc: IrSimpleFunction,
+    ) {
+        val body = func.body as IrBlockBody
+        val builder = context.createIrBuilder(func.symbol, body.startOffset, body.endOffset)
+        val siteByReturn = sites.associateBy { it.returnExpr }
+
+        body.transform(object : IrTransformer<Nothing?>() {
+            override fun visitReturn(expression: IrReturn, data: Nothing?): IrExpression {
+                val site = siteByReturn[expression] ?: return super.visitReturn(expression, data)
+                val other = site.opCall.arguments[if (site.recOnRight) 0 else 1]!!
+                return builder.irBlock {
+                    // Keep the original evaluation order: the seed before the recursion arguments.
+                    val seed = createTmpVariable(other, nameHint = "tmcSeed")
+                    +builder.irReturn(
+                        builder.irCall(fAcc.symbol).apply {
+                            for (i in site.recursiveCall.arguments.indices) {
+                                arguments[i] = site.recursiveCall.arguments[i]
+                            }
+                            arguments[site.recursiveCall.arguments.size] = builder.irGet(seed)
+                        },
+                    )
+                }
+            }
+        }, null)
+    }
+
+    private fun buildAccBodyFromCopy(
+        fAcc: IrSimpleFunction,
+        original: IrSimpleFunction,
+        bodyCopy: IrBlockBody,
+        opSymbol: IrSimpleFunctionSymbol,
+    ) {
+        val builder = context.createIrBuilder(fAcc.symbol, fAcc.startOffset, fAcc.endOffset)
+        val accParam = fAcc.parameters.last()
+        val origFuncSymbol = original.symbol
+
+        val paramMapping: Map<IrValueSymbol, IrValueSymbol> = original.parameters.withIndex().associate { iv ->
+            iv.value.symbol to fAcc.parameters[iv.index].symbol
+        }
+        remapSymbols(bodyCopy, paramMapping)
+
+        fun IrBuilderWithScope.irAccOp(lhs: IrExpression, rhs: IrExpression): IrExpression =
+            irCall(opSymbol).apply {
+                arguments[0] = lhs
+                arguments[1] = rhs
+            }
+
+        bodyCopy.transform(object : IrTransformer<Nothing?>() {
+            override fun visitReturn(expression: IrReturn, data: Nothing?): IrExpression {
+                expression.transformChildren(this, data)
+                if (expression.returnTargetSymbol != origFuncSymbol) return expression
+
+                val value = expression.value
+                val opCall = value as? IrCall
+                if (opCall != null && opCall.symbol == opSymbol) {
+                    val lhs = opCall.arguments[0]
+                    val rhs = opCall.arguments[1]
+                    val recCall: IrCall?
+                    val other: IrExpression?
+                    if (rhs is IrCall && rhs.symbol == origFuncSymbol) {
+                        recCall = rhs; other = lhs
+                    } else if (lhs is IrCall && lhs.symbol == origFuncSymbol) {
+                        recCall = lhs; other = rhs
+                    } else {
+                        recCall = null; other = null
+                    }
+                    if (recCall != null && other != null) {
+                        return builder.irBlock {
+                            // Keep the original evaluation order: the operand before the recursion arguments.
+                            val otherTmp = createTmpVariable(other, nameHint = "tmcOperand")
+                            +builder.irReturn(
+                                builder.irCall(fAcc.symbol).apply {
+                                    for (i in recCall.arguments.indices) {
+                                        arguments[i] = recCall.arguments[i]
+                                    }
+                                    arguments[recCall.arguments.size] =
+                                        builder.irAccOp(builder.irGet(accParam), builder.irGet(otherTmp))
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Base case: fold the accumulator into the returned value.
+                expression.value = builder.irAccOp(builder.irGet(accParam), value)
+                return expression
+            }
+        }, null)
+
+        fAcc.body = bodyCopy
+        bodyCopy.patchDeclarationParents(fAcc)
     }
 
     // -------------------------------------------------------------- 2-function mutual-rec
