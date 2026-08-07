@@ -7,7 +7,9 @@ package org.jetbrains.kotlin.backend.wasm.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
 import org.jetbrains.kotlin.backend.common.ir.ValueRemapper
+import org.jetbrains.kotlin.backend.common.ir.isPure
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
+import org.jetbrains.kotlin.util.OperatorNameConventions
 import org.jetbrains.kotlin.backend.wasm.utils.StronglyConnectedComponents
 import org.jetbrains.kotlin.backend.wasm.utils.hasTailModConsAnnotation
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
@@ -130,9 +132,16 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
         // Accumulator form: `return g op self(...)` where op is an associative
         // Int/Long operator. Self-recursion only; runs before the constructor
-        // forms because its shape is disjoint from theirs.
+        // forms because its shape is disjoint from theirs. Rejection reasons are
+        // kept so the checked-contract error names the strategy that gave up.
+        val accumRejections = mutableMapOf<IrSimpleFunction, String>()
         for (f in allFunctions) {
-            if (f !in transformed && tryAccumulatorTransform(f)) transformed += f
+            if (f in transformed) continue
+            when (val scan = collectAccumSites(f)) {
+                is AccumScan.Eligible -> if (tryAccumulatorTransform(f, scan.sites)) transformed += f
+                is AccumScan.Rejected -> accumRejections[f] = scan.reason
+                AccumScan.NoSites -> {}
+            }
         }
 
         // Only calls to functions of this file can form transformable cycles.
@@ -171,6 +180,8 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         for (f in allFunctions) {
             if (f in transformed) continue
             val reason = when {
+                f in accumRejections -> "the associative-operation recursion does not fit the accumulator shape " +
+                        "(${accumRejections.getValue(f)})"
                 f !in sitesByFunc -> "no recursive call wrapped in a constructor or an associative Int/Long operation was found " +
                         "(for mutual recursion, every function in the cycle needs the annotation)"
                 sitesByFunc.getValue(f).none { it.recursiveCall.symbol == f.symbol } &&
@@ -394,17 +405,33 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
      */
     private class AccumSite(
         val returnExpr: IrReturn,
-        val opCall: IrCall,
+        val opSymbol: IrSimpleFunctionSymbol,
         val recursiveCall: IrCall,
-        val recOnRight: Boolean,
+        val otherOperand: IrExpression,
     )
 
-    private val accumOpNames = setOf("plus", "times", "and", "or", "xor")
+    private sealed class AccumScan {
+        /** No `return <x> op self(...)` site exists; fall through to the constructor strategies. */
+        object NoSites : AccumScan()
+
+        /** Sites exist but a constraint disqualifies them; surfaced in the checked-contract error. */
+        class Rejected(val reason: String) : AccumScan()
+
+        class Eligible(val sites: List<AccumSite>) : AccumScan()
+    }
+
+    private val accumOpNames = setOf(
+        OperatorNameConventions.PLUS,
+        OperatorNameConventions.TIMES,
+        OperatorNameConventions.AND,
+        OperatorNameConventions.OR,
+        OperatorNameConventions.XOR,
+    )
 
     /** True for `Int.plus(Int)`-shaped intrinsics whose receiver, operand, and result all are [classifier]. */
     private fun isAccumOp(call: IrCall, classifier: Any?): Boolean {
         val owner = call.symbol.owner
-        if (owner.name.asString() !in accumOpNames) return false
+        if (owner.name !in accumOpNames) return false
         val parentClass = owner.parentClassOrNull ?: return false
         if (parentClass.symbol != context.irBuiltIns.intClass && parentClass.symbol != context.irBuiltIns.longClass) return false
         if (owner.parameters.size != 2) return false
@@ -413,21 +440,13 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
     }
 
     /**
-     * The other operand of a left-recursive site is evaluated before the recursion in the
-     * transformed code but after it in the original, so it must be order-insensitive.
+     * Collects `return <g> op self(...)` sites. The other operand of a left-recursive
+     * site is evaluated before the recursion in the transformed code but after it in
+     * the original, so it must be order-insensitive ([isPure]).
      */
-    private fun isPureOperand(expr: IrExpression): Boolean =
-        expr is IrConst || (expr is IrGetValue && expr.symbol.owner is IrValueParameter)
-
-    /**
-     * Collects `return <g> op self(...)` sites. Returns null when the function does not
-     * fit the accumulator shape: a differing operator between sites, a self-call outside
-     * a site, an impure operand next to a left-positioned recursion, a try block, or a
-     * non-Int/Long return type.
-     */
-    private fun collectAccumSites(func: IrSimpleFunction): List<AccumSite>? {
+    private fun collectAccumSites(func: IrSimpleFunction): AccumScan {
         val classifier = func.returnType.classifierOrFail
-        if (classifier != context.irBuiltIns.intClass && classifier != context.irBuiltIns.longClass) return null
+        if (classifier != context.irBuiltIns.intClass && classifier != context.irBuiltIns.longClass) return AccumScan.NoSites
 
         val selfSymbol = func.symbol
         val sites = mutableListOf<AccumSite>()
@@ -454,10 +473,10 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                         val lhs = value.arguments[0]
                         val rhs = value.arguments[1]
                         when {
-                            rhs is IrCall && rhs.symbol == selfSymbol ->
-                                sites += AccumSite(expression, value, rhs, recOnRight = true)
-                            lhs is IrCall && lhs.symbol == selfSymbol && rhs != null && isPureOperand(rhs) ->
-                                sites += AccumSite(expression, value, lhs, recOnRight = false)
+                            rhs is IrCall && rhs.symbol == selfSymbol && lhs != null ->
+                                sites += AccumSite(expression, value.symbol, rhs, lhs)
+                            lhs is IrCall && lhs.symbol == selfSymbol && rhs != null && rhs.isPure(anyVariable = false) ->
+                                sites += AccumSite(expression, value.symbol, lhs, rhs)
                         }
                     }
                 }
@@ -465,13 +484,18 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         })
 
-        if (sawTry || sites.isEmpty()) return null
-        // Every self-call must be the recursion operand of exactly one site; a self-call
-        // in any other position (base-case value, condition, site operand) disqualifies.
-        if (totalSelfCalls != sites.size) return null
-        // A single accumulator can only track a single operator.
-        if (sites.map { it.opCall.symbol }.distinct().size != 1) return null
-        return sites
+        if (sites.isEmpty()) return AccumScan.NoSites
+        return when {
+            sawTry -> AccumScan.Rejected("a try block prevents the accumulator rewrite")
+            // Every self-call must be the recursion operand of exactly one site; a self-call
+            // in any other position (base-case value, condition, site operand) disqualifies.
+            totalSelfCalls != sites.size ->
+                AccumScan.Rejected("every recursive call must be an operand of an associative Int/Long operation in a return statement")
+            // A single accumulator can only track a single operator.
+            sites.any { it.opSymbol != sites.first().opSymbol } ->
+                AccumScan.Rejected("the return sites mix different operators")
+            else -> AccumScan.Eligible(sites)
+        }
     }
 
     /**
@@ -485,30 +509,14 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
      * original right fold. The sibling's self-call is in tail position and its
      * [TMC_DPS_FUNCTION] origin makes [WasmTailCallLowering] mark it for `return_call`.
      */
-    private fun tryAccumulatorTransform(func: IrSimpleFunction): Boolean {
+    private fun tryAccumulatorTransform(func: IrSimpleFunction, sites: List<AccumSite>): Boolean {
         val container = func.parent as? IrDeclarationContainer ?: return false
-        val sites = collectAccumSites(func) ?: return false
-        val opSymbol = sites.first().opCall.symbol
+        val opSymbol = sites.first().opSymbol
         val accType = func.returnType
-        val bodyCopy = (func.body as? IrBlockBody ?: return false).deepCopyWithSymbols()
+        val bodyCopy = (func.body as IrBlockBody).deepCopyWithSymbols()
 
         val fAcc = context.irFactory.stageController.restrictTo(func) {
-            context.irFactory.addFunction(container) {
-                // The "$tmcAcc" suffix is asserted by wasm-ir-checks testdata (WASM_CHECK_INSTRUCTION_IN_FUNCTION).
-                name = Name.identifier(func.name.asString() + "\$tmcAcc")
-                visibility = DescriptorVisibilities.PRIVATE
-                modality = Modality.FINAL
-                returnType = accType
-                origin = TMC_DPS_FUNCTION
-                startOffset = func.startOffset
-                endOffset = func.endOffset
-            }.apply {
-                // Parameter order must match the original so call sites copy arguments positionally.
-                for (origParam in func.parameters) {
-                    addValueParameter(origParam.name, origParam.type)
-                }
-                addValueParameter("\$tmcAcc", accType)
-            }
+            createTmcSibling(container, func, "\$tmcAcc", returnType = accType, extraParamName = "\$tmcAcc", extraParamType = accType)
         }
 
         buildAccBodyFromCopy(fAcc, func, bodyCopy, opSymbol)
@@ -528,7 +536,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         body.transform(object : IrTransformer<Nothing?>() {
             override fun visitReturn(expression: IrReturn, data: Nothing?): IrExpression {
                 val site = siteByReturn[expression] ?: return super.visitReturn(expression, data)
-                val other = site.opCall.arguments[if (site.recOnRight) 0 else 1]!!
+                val other = site.otherOperand
                 return builder.irBlock {
                     // Keep the original evaluation order: the seed before the recursion arguments.
                     val seed = createTmpVariable(other, nameHint = "tmcSeed")
@@ -664,22 +672,37 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         container: IrDeclarationContainer,
         original: IrSimpleFunction,
         dstType: IrType,
+    ): IrSimpleFunction =
+        createTmcSibling(container, original, "\$tmcDps", returnType = context.irBuiltIns.unitType, extraParamName = "\$tmcDst", extraParamType = dstType)
+
+    /**
+     * Synthesizes a TMC helper next to [original]: same parameters plus one appended
+     * extra parameter (the DPS destination or the accumulator).
+     * The "$tmcDps" / "$tmcAcc" suffixes are asserted by wasm-ir-checks testdata
+     * (WASM_CHECK_INSTRUCTION_IN_FUNCTION).
+     */
+    private fun createTmcSibling(
+        container: IrDeclarationContainer,
+        original: IrSimpleFunction,
+        nameSuffix: String,
+        returnType: IrType,
+        extraParamName: String,
+        extraParamType: IrType,
     ): IrSimpleFunction {
         return context.irFactory.addFunction(container) {
-            // The "$tmcDps" suffix is asserted by wasm-ir-checks testdata (WASM_CHECK_INSTRUCTION_IN_FUNCTION).
-            name = Name.identifier(original.name.asString() + "\$tmcDps")
+            name = Name.identifier(original.name.asString() + nameSuffix)
             visibility = DescriptorVisibilities.PRIVATE
             modality = Modality.FINAL
-            returnType = context.irBuiltIns.unitType
+            this.returnType = returnType
             origin = TMC_DPS_FUNCTION
             startOffset = original.startOffset
             endOffset = original.endOffset
         }.apply {
-            // Parameter order must match the original so DPS call sites copy arguments positionally.
+            // Parameter order must match the original so call sites copy arguments positionally.
             for (origParam in original.parameters) {
                 addValueParameter(origParam.name, origParam.type)
             }
-            addValueParameter("\$tmcDst", dstType)
+            addValueParameter(extraParamName, extraParamType)
         }
     }
 
@@ -1080,7 +1103,11 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
 }
 
-/** Marks the synthesized `f\$tmcDps` destination-passing helpers. */
+/**
+ * Marks the synthesized TMC helpers (`f\$tmcDps` destination-passing and `f\$tmcAcc`
+ * accumulator siblings), whose tail self-calls must be emitted as `return_call`
+ * regardless of the tail-call flag.
+ */
 internal val TMC_DPS_FUNCTION by IrDeclarationOriginImpl.Regular
 
 private data class TmcSite(
