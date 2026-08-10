@@ -32,6 +32,7 @@ private val wasmArrayOfFqName = FqName("kotlin.wasm.internal.WasmArrayOf")
 private val jsFunFqName = FqName("kotlin.JsFun")
 private val jsPrimitiveFqName = FqName("kotlin.wasm.internal.JsPrimitive")
 private val wasmExportFqName = FqName("kotlin.wasm.WasmExport")
+private val stacklessVirtualRecursionFqName = FqName("kotlin.wasm.StacklessVirtualRecursion")
 private val jsBuiltinFqName = FqName("kotlin.wasm.internal.JsBuiltin")
 
 fun IrAnnotationContainer.hasExcludedFromCodegenAnnotation(): Boolean =
@@ -96,3 +97,6 @@ fun IrAnnotationContainer.getJsFunAnnotation(): String? =
 
 fun IrAnnotationContainer.getJsPrimitiveType(): String? =
     getAnnotation(jsPrimitiveFqName)?.getConstArgument("type")
+
+fun IrAnnotationContainer.hasStacklessVirtualRecursionAnnotation(): Boolean =
+    hasAnnotation(stacklessVirtualRecursionFqName)

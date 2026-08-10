@@ -319,4 +319,15 @@ val actualWasmArguments by compilerArgumentsLevel(CompilerArgumentsLevelNames.wa
         )
         restrictedToCompilerPhase = KotlinCompilerPhase.BACKEND_COMPILATION
     }
+
+    compilerArgument {
+        name = "Xwasm-enable-stackless-recursion"
+        description = "Convert @StacklessVirtualRecursion-annotated virtual method hierarchies into heap-frame trampolines.".asReleaseDependent()
+        valueType = BooleanType.defaultFalse
+
+        lifecycle(
+            introducedVersion = KotlinReleaseVersion.v2_5_0,
+        )
+        restrictedToCompilerPhase = KotlinCompilerPhase.BACKEND_COMPILATION
+    }
 }

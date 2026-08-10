@@ -150,6 +150,16 @@ public interface WasmCompilerLinkingArguments : WasmCompilerArguments,
         WasmCompilerLinkingArgument("X_WASM_ENABLE_ASSERTS", KotlinReleaseVersion(2, 1, 20))
 
     /**
+     * Convert @StacklessVirtualRecursion-annotated virtual method hierarchies into heap-frame trampolines.
+     *
+     * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.
+     */
+    @JvmField
+    @ExperimentalCompilerArgument
+    public val X_WASM_ENABLE_STACKLESS_RECURSION: WasmCompilerLinkingArgument<Boolean> =
+        WasmCompilerLinkingArgument("X_WASM_ENABLE_STACKLESS_RECURSION", KotlinReleaseVersion(2, 5, 0))
+
+    /**
      * Emit WebAssembly tail call instructions (return_call / return_call_indirect).
      *
      * WARNING: this option is EXPERIMENTAL and it may be changed in the future without notice or may be removed entirely.

@@ -116,6 +116,16 @@ class KotlinWasmCompilerArguments : CommonJsAndWasmCompilerArguments() {
         }
 
     @Argument(
+        value = "-Xwasm-enable-stackless-recursion",
+        description = "Convert @StacklessVirtualRecursion-annotated virtual method hierarchies into heap-frame trampolines.",
+    )
+    var wasmEnableStacklessRecursion: Boolean = false
+        set(value) {
+            checkFrozen()
+            field = value
+        }
+
+    @Argument(
         value = "-Xwasm-enable-tail-calls",
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect).",
     )

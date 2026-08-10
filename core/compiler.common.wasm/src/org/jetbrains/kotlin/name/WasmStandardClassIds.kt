@@ -21,6 +21,9 @@ object WasmStandardClassIds {
         val WasmExport = "WasmExport".wasmId()
 
         @JvmField
+        val StacklessVirtualRecursion = "StacklessVirtualRecursion".wasmId()
+
+        @JvmField
         val JsFun = "JsFun".baseId()
 
         @JvmField

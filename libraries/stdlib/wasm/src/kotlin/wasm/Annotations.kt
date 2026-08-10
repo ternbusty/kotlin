@@ -48,3 +48,8 @@ public annotation class WasmImport(
 public annotation class WasmExport(
     val name: String = ""
 )
+
+@ExperimentalWasmInterop
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.BINARY)
+public actual annotation class StacklessVirtualRecursion
