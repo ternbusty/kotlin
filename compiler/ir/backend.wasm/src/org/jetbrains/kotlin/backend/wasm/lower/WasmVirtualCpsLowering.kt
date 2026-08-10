@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.backend.wasm.lower
 
 import org.jetbrains.kotlin.backend.common.ModuleLoweringPass
+import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.backend.wasm.lower.virtualcps.*
 import org.jetbrains.kotlin.descriptors.ClassKind
@@ -14,12 +15,18 @@ import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.MessageCollectorAccess
 import org.jetbrains.kotlin.ir.IrElement
+import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
+import org.jetbrains.kotlin.ir.builders.irBlock
+import org.jetbrains.kotlin.ir.builders.irGet
+import org.jetbrains.kotlin.ir.builders.irTemporary
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.isSubclassOf
+import org.jetbrains.kotlin.ir.util.patchDeclarationParents
+import org.jetbrains.kotlin.ir.visitors.IrTransformer
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
@@ -235,6 +242,7 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
                 continue
             }
             val copy = original.deepCopyWithSymbols(info.function)
+            normalizeTargetCallArguments(copy, info.function) { isTargetCall(it, baseMethod) }
             val planner = BodyPlanner(info.function, baseMethod, copy, irBuiltIns = context.irBuiltIns)
             val plan = planner.plan()
             if (plan != null) plans += plan else {
@@ -248,6 +256,65 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
             VirtualCpsHierarchyCodegen(context, base, baseMethod, plans, bailedOut).generate()
         }
         reportPlanSummary(base, plans, bailedOut, bailReasons)
+    }
+
+    // ================================================================ ANF normalization
+
+    /**
+     * Hoists every argument list containing a target call into ordered
+     * temporaries, so nested shapes like `a + targetCall(b)` become
+     * `{ val t0 = a; val t1 = targetCall(b); t0 + t1 }`, which the body
+     * planner can split. Evaluation order is preserved by hoisting all
+     * arguments up to and including the last target-carrying one.
+     *
+     * This is the same transformation as
+     * [WasmDrfAcceleration.normalizeTargetCallArguments].
+     */
+    private fun normalizeTargetCallArguments(
+        body: IrBlockBody,
+        owner: IrSimpleFunction,
+        isTarget: (IrCall) -> Boolean,
+    ) {
+        fun containsTarget(e: IrElement): Boolean {
+            var found = false
+            e.acceptVoid(object : IrVisitorVoid() {
+                override fun visitElement(element: IrElement) {
+                    if (!found) element.acceptChildrenVoid(this)
+                }
+
+                override fun visitFunction(declaration: IrFunction) {}
+
+                override fun visitCall(expression: IrCall) {
+                    if (isTarget(expression)) found = true
+                    if (!found) expression.acceptChildrenVoid(this)
+                }
+            })
+            return found
+        }
+
+        val b = context.createIrBuilder(owner.symbol, UNDEFINED_OFFSET, UNDEFINED_OFFSET)
+        body.transform(object : IrTransformer<Nothing?>() {
+            override fun visitCall(expression: IrCall, data: Nothing?): IrElement {
+                expression.transformChildren(this, data)
+                // Unlike the DRF variant, do NOT skip target calls here.
+                // In DRF the target is a single self-recursive function, so
+                // target(target(x)) never occurs. In virtual CPS the target
+                // is any call to the base method, so next.apply(inner.apply(v))
+                // nests one target inside another. We must hoist in that case.
+                val lastTargetArg = (expression.arguments.indices).lastOrNull { i ->
+                    expression.arguments[i]?.let { containsTarget(it) } == true
+                } ?: return expression
+                return b.irBlock(resultType = expression.type) {
+                    for (i in 0..lastTargetArg) {
+                        val arg = expression.arguments[i] ?: continue
+                        val tmp = irTemporary(arg, nameHint = "anf$i")
+                        expression.arguments[i] = irGet(tmp)
+                    }
+                    +expression
+                }
+            }
+        }, null)
+        body.patchDeclarationParents(owner)
     }
 
     // ================================================================ diagnostics
