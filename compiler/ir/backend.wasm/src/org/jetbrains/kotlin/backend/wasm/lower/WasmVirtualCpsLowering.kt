@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.backend.common.ModuleLoweringPass
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.backend.wasm.lower.virtualcps.*
 import org.jetbrains.kotlin.descriptors.ClassKind
+import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.MessageCollectorAccess
@@ -16,6 +17,7 @@ import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.isSubclassOf
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
@@ -55,14 +57,12 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
 
     companion object {
         /**
-         * Minimum number of concrete overrides whose bodies contain a
-         * virtual call back to the abstract method for auto-detection to
-         * trigger. A threshold of 2 filters out single-delegation patterns
-         * (e.g. `AbstractMutableList.add` delegating to a backing list)
-         * while retaining genuine mutual-recursion hierarchies (e.g.
-         * regex `AbstractSet.matches()` with multiple recursive subclasses).
+         * Minimum number of concrete overrides with polymorphic recursive
+         * calls required for auto-detection. A threshold of 2 filters out
+         * single-delegation patterns while retaining genuine mutual-
+         * recursion hierarchies with multiple participating subclasses.
          */
-        private const val MIN_RECURSIVE_OVERRIDES = 2
+        private const val MIN_POLYMORPHIC_RECURSIVE_OVERRIDES = 2
     }
 
     override fun lower(irModule: IrModuleFragment) {
@@ -79,8 +79,8 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
 
     /**
      * Scans abstract methods declared in abstract classes and returns those
-     * whose concrete overrides contain virtual calls back to the same
-     * abstract method, forming a recursive cycle.
+     * whose concrete overrides contain polymorphic virtual calls back to
+     * the same abstract method, forming a potential recursive cycle.
      *
      * Two filters reduce false positives.
      *
@@ -89,9 +89,17 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
      *     characteristic of abstract base classes (e.g. regex
      *     `AbstractSet.matches()`), not interface contracts.
      *
-     *  2. At least [MIN_RECURSIVE_OVERRIDES] overrides must contain a
-     *     target call. This filters out single-delegation patterns
-     *     (e.g. `AbstractMutableList.add` delegating to a backing list).
+     *  2. Only calls whose dispatch receiver has a non-final static type
+     *     are counted. A final receiver (e.g. `this.toInt().toShort()`
+     *     where the receiver is `Int`) resolves to a single override and
+     *     cannot form a cycle. A non-final receiver (e.g. `next.matches()`
+     *     where `next` is typed as the abstract base) can dispatch to any
+     *     override at runtime, enabling unbounded mutual recursion.
+     *
+     *  3. At least [MIN_POLYMORPHIC_RECURSIVE_OVERRIDES] overrides must
+     *     contain such a polymorphic call. This filters out single-
+     *     delegation patterns (e.g. one `AbstractMutableList.add`
+     *     override forwarding to a delegate).
      */
     private fun detectRecursiveVirtualMethods(
         allClasses: List<IrClass>,
@@ -102,7 +110,8 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
             for (fn in cls.declarations.filterIsInstance<IrSimpleFunction>()) {
                 if (fn.body != null) continue
                 if (fn.isFakeOverride) continue
-                if (countRecursiveOverrides(cls, fn, allClasses) >= MIN_RECURSIVE_OVERRIDES) {
+                val count = countPolymorphicRecursiveOverrides(cls, fn, allClasses)
+                if (count >= MIN_POLYMORPHIC_RECURSIVE_OVERRIDES) {
                     result += cls to fn
                 }
             }
@@ -111,10 +120,11 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
     }
 
     /**
-     * Counts how many concrete overrides of [baseMethod] within
-     * subclasses of [base] contain a virtual call back to [baseMethod].
+     * Counts concrete overrides of [baseMethod] within subclasses of
+     * [base] whose bodies contain a polymorphic virtual call back to
+     * [baseMethod] (dispatch receiver is non-final).
      */
-    private fun countRecursiveOverrides(
+    private fun countPolymorphicRecursiveOverrides(
         base: IrClass,
         baseMethod: IrSimpleFunction,
         allClasses: List<IrClass>,
@@ -128,12 +138,17 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
                     fn.body != null && !fn.isFakeOverride &&
                             fn.allOverriddenIncludingSelf().any { it == baseMethod }
                 } ?: continue
-            if (bodyContainsCallTo(override, baseMethod)) count++
+            if (bodyContainsPolymorphicCallTo(override, baseMethod)) count++
         }
         return count
     }
 
-    private fun bodyContainsCallTo(
+    /**
+     * Walks [function]'s body looking for a virtual call to [baseMethod]
+     * whose dispatch receiver has a non-final static type, meaning the
+     * call could dispatch to any override at runtime.
+     */
+    private fun bodyContainsPolymorphicCallTo(
         function: IrSimpleFunction,
         baseMethod: IrSimpleFunction,
     ): Boolean {
@@ -145,8 +160,14 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
 
             override fun visitCall(expression: IrCall) {
                 if (isTargetCall(expression, baseMethod)) {
-                    found = true
-                    return
+                    val receiverClass = expression.dispatchReceiver
+                        ?.type?.classOrNull?.owner
+                    if (receiverClass == null ||
+                        receiverClass.modality != Modality.FINAL
+                    ) {
+                        found = true
+                        return
+                    }
                 }
                 expression.acceptChildrenVoid(this)
             }
