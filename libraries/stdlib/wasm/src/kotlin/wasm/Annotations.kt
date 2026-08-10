@@ -48,3 +48,16 @@ public annotation class WasmImport(
 public annotation class WasmExport(
     val name: String = ""
 )
+
+/**
+ * Instructs the Kotlin/Wasm compiler to compile this function with the
+ * tail-modulo-cons transformation, so that a recursive call whose result is
+ * consumed only by a constructor runs in constant stack space regardless of
+ * depth.
+ *
+ * Annotating a function whose shape the transformation cannot handle is a
+ * compilation error, so the constant-stack property never degrades silently.
+ */
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.BINARY)
+public annotation class TailModCons
