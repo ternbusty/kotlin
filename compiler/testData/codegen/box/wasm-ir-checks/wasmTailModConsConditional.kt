@@ -8,6 +8,8 @@
 // the base case, which is valid because they reference neither the
 // recursive result nor any saved variable.
 
+@file:OptIn(kotlin.wasm.ExperimentalWasmInterop::class)
+
 import kotlin.wasm.TailModCons
 
 sealed class Type

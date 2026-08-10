@@ -11,6 +11,8 @@
 // run in constant stack. At depth 500_000 these patterns would overflow the host stack without the
 // transform.
 
+@file:OptIn(kotlin.wasm.ExperimentalWasmInterop::class)
+
 import kotlin.wasm.TailModCons
 
 class Cell(val value: Int, val next: Cell?)

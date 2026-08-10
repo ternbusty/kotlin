@@ -58,6 +58,7 @@ public annotation class WasmExport(
  * Annotating a function whose shape the transformation cannot handle is a
  * compilation error, so the constant-stack property never degrades silently.
  */
+@ExperimentalWasmInterop
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.BINARY)
 public annotation class TailModCons
