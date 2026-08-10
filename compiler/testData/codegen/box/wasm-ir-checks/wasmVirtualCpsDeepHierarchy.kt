@@ -1,15 +1,12 @@
 // TARGET_BACKEND: WASM
 // ENABLE_STACKLESS_RECURSION
 
-@file:OptIn(kotlin.wasm.ExperimentalWasmInterop::class)
-
 // Tests CHA with a wider class hierarchy: an abstract base with many
 // concrete subclasses at two inheritance levels. Verifies that the
 // lowering correctly finds all overrides through the hierarchy.
 
 abstract class Expr {
     var next: Expr? = null
-    @kotlin.wasm.StacklessVirtualRecursion
     abstract fun eval(acc: Int): Int
 }
 

@@ -8,13 +8,14 @@ package org.jetbrains.kotlin.backend.wasm.lower
 import org.jetbrains.kotlin.backend.common.ModuleLoweringPass
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
 import org.jetbrains.kotlin.backend.wasm.lower.virtualcps.*
-import org.jetbrains.kotlin.backend.wasm.utils.hasStacklessVirtualRecursionAnnotation
+import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.MessageCollectorAccess
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
+import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.isSubclassOf
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
@@ -24,17 +25,19 @@ import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
 
 /**
  * Defunctionalized CPS conversion for virtual mutual recursion over a closed
- * class hierarchy, driven by the `@kotlin.wasm.StacklessVirtualRecursion`
- * annotation and gated behind `-Xwasm-enable-stackless-recursion`.
+ * class hierarchy, gated behind `-Xwasm-enable-stackless-recursion`.
  *
- * Place the annotation on an abstract function in a base class. This pass
- * uses class-hierarchy analysis to collect every override in the module and
+ * This pass automatically detects abstract methods whose overrides contain
+ * recursive virtual calls back to the same method. No annotation is required.
+ * It uses class-hierarchy analysis to collect every override in the module and
  * compiles them into a single flat state machine with heap-allocated frames.
  * Overrides whose bodies the transformation cannot handle fall back to their
  * original virtual dispatch transparently.
  *
  * Design:
- *  - CHA enumerates all overrides of the annotated base method in the module
+ *  - Auto-detection scans every abstract method in the module; if at least one
+ *    concrete override body calls the method virtually, it is a candidate.
+ *  - CHA enumerates all overrides of each detected method in the module
  *    (sound under Wasm whole-world compilation).
  *  - Each override body is compiled into a basic-block plan, splitting at
  *    virtual call sites of the target method:
@@ -50,39 +53,105 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
 
     private val enabled = context.configuration.get(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION) == true
 
+    companion object {
+        /**
+         * Minimum number of concrete overrides whose bodies contain a
+         * virtual call back to the abstract method for auto-detection to
+         * trigger. A threshold of 2 filters out single-delegation patterns
+         * (e.g. `AbstractMutableList.add` delegating to a backing list)
+         * while retaining genuine mutual-recursion hierarchies (e.g.
+         * regex `AbstractSet.matches()` with multiple recursive subclasses).
+         */
+        private const val MIN_RECURSIVE_OVERRIDES = 2
+    }
+
     override fun lower(irModule: IrModuleFragment) {
+        if (!enabled) return
         val allClasses = collectClasses(irModule)
-        val annotatedMethods = collectAnnotatedMethods(allClasses)
-        if (!enabled) {
-            if (annotatedMethods.isNotEmpty()) {
-                warnAnnotationWithoutFlag(annotatedMethods)
-            }
-            return
-        }
-        for (pair in annotatedMethods) {
+        val candidates = detectRecursiveVirtualMethods(allClasses)
+        for (pair in candidates) {
             lowerHierarchy(irModule, pair.first, pair.second, allClasses)
         }
         WasmDrfAcceleration(context).lower(irModule)
     }
 
-    // ================================================================ annotation scanning
+    // ================================================================ auto-detection
 
     /**
-     * Collects abstract methods annotated with `@StacklessVirtualRecursion`
-     * across all classes in the module.
+     * Scans abstract methods declared in abstract classes and returns those
+     * whose concrete overrides contain virtual calls back to the same
+     * abstract method, forming a recursive cycle.
+     *
+     * Two filters reduce false positives.
+     *
+     *  1. Interface methods are excluded because the recursion-through-
+     *     virtual-dispatch pattern that causes stack overflow is
+     *     characteristic of abstract base classes (e.g. regex
+     *     `AbstractSet.matches()`), not interface contracts.
+     *
+     *  2. At least [MIN_RECURSIVE_OVERRIDES] overrides must contain a
+     *     target call. This filters out single-delegation patterns
+     *     (e.g. `AbstractMutableList.add` delegating to a backing list).
      */
-    private fun collectAnnotatedMethods(
+    private fun detectRecursiveVirtualMethods(
         allClasses: List<IrClass>,
     ): List<Pair<IrClass, IrSimpleFunction>> {
         val result = mutableListOf<Pair<IrClass, IrSimpleFunction>>()
         for (cls in allClasses) {
+            if (cls.kind != ClassKind.CLASS) continue
             for (fn in cls.declarations.filterIsInstance<IrSimpleFunction>()) {
-                if (fn.body == null && fn.hasStacklessVirtualRecursionAnnotation()) {
+                if (fn.body != null) continue
+                if (fn.isFakeOverride) continue
+                if (countRecursiveOverrides(cls, fn, allClasses) >= MIN_RECURSIVE_OVERRIDES) {
                     result += cls to fn
                 }
             }
         }
         return result
+    }
+
+    /**
+     * Counts how many concrete overrides of [baseMethod] within
+     * subclasses of [base] contain a virtual call back to [baseMethod].
+     */
+    private fun countRecursiveOverrides(
+        base: IrClass,
+        baseMethod: IrSimpleFunction,
+        allClasses: List<IrClass>,
+    ): Int {
+        var count = 0
+        for (cls in allClasses) {
+            if (!cls.isSubclassOf(base)) continue
+            val override = cls.declarations
+                .filterIsInstance<IrSimpleFunction>()
+                .firstOrNull { fn ->
+                    fn.body != null && !fn.isFakeOverride &&
+                            fn.allOverriddenIncludingSelf().any { it == baseMethod }
+                } ?: continue
+            if (bodyContainsCallTo(override, baseMethod)) count++
+        }
+        return count
+    }
+
+    private fun bodyContainsCallTo(
+        function: IrSimpleFunction,
+        baseMethod: IrSimpleFunction,
+    ): Boolean {
+        var found = false
+        function.acceptVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) {
+                if (!found) element.acceptChildrenVoid(this)
+            }
+
+            override fun visitCall(expression: IrCall) {
+                if (isTargetCall(expression, baseMethod)) {
+                    found = true
+                    return
+                }
+                expression.acceptChildrenVoid(this)
+            }
+        })
+        return found
     }
 
     private fun collectClasses(irModule: IrModuleFragment): List<IrClass> {
@@ -161,22 +230,6 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
     }
 
     // ================================================================ diagnostics
-
-    private fun warnAnnotationWithoutFlag(
-        annotatedMethods: List<Pair<IrClass, IrSimpleFunction>>,
-    ) {
-        val locations = annotatedMethods.joinToString(", ") {
-            "${it.first.name}.${it.second.name}"
-        }
-        @OptIn(MessageCollectorAccess::class)
-        context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
-            ?.report(
-                CompilerMessageSeverity.WARNING,
-                "@StacklessVirtualRecursion is used on $locations but " +
-                        "-Xwasm-enable-stackless-recursion is not enabled. " +
-                        "The annotation will have no effect."
-            )
-    }
 
     private fun reportPlanSummary(
         base: IrClass,

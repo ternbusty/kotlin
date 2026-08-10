@@ -1,8 +1,6 @@
 // TARGET_BACKEND: WASM
 // ENABLE_STACKLESS_RECURSION
 
-@file:OptIn(kotlin.wasm.ExperimentalWasmInterop::class)
-
 // Tests partial conversion: one override uses try-catch wrapping a target
 // call, which the planner cannot split. That override bails out and keeps
 // its native virtual body, while the others are converted into the CPS
@@ -11,7 +9,6 @@
 
 abstract class Processor {
     var next: Processor? = null
-    @kotlin.wasm.StacklessVirtualRecursion
     abstract fun process(value: Int): Int
 }
 

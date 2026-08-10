@@ -1,8 +1,6 @@
 // TARGET_BACKEND: WASM
 // ENABLE_STACKLESS_RECURSION
 
-@file:OptIn(kotlin.wasm.ExperimentalWasmInterop::class)
-
 // Models the stdlib regex matcher hierarchy (kotlin.text.regex.AbstractSet):
 // mutual recursion through VIRTUAL dispatch over an object graph with cycles.
 // The recursion depth is proportional to input length, which is the root
@@ -18,7 +16,6 @@
 
 abstract class MiniSet {
     var next: MiniSet? = null
-    @kotlin.wasm.StacklessVirtualRecursion
     abstract fun matches(startIndex: Int, testString: CharSequence, state: MatchState): Int
 }
 

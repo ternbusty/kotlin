@@ -1,14 +1,11 @@
 // TARGET_BACKEND: WASM
 // ENABLE_STACKLESS_RECURSION
 
-@file:OptIn(kotlin.wasm.ExperimentalWasmInterop::class)
-
 // All virtual calls are in tail position, so the trampoline uses receiver
 // swaps without heap-frame allocation. Models a linked-list evaluator where
 // each node delegates to the next via a tail virtual call.
 
 abstract class Node {
-    @kotlin.wasm.StacklessVirtualRecursion
     abstract fun eval(acc: Int): Int
 }
 
