@@ -39,37 +39,12 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
 
 /**
- * Tail Modulo Cons (TMC) lowering for Kotlin/Wasm.
- *
- * Rewrites functions annotated with `kotlin.wasm.TailModCons` whose return
- * statement wraps a recursive call inside a constructor (directly or via a
- * local variable):
- *
- *     return Ctor(c(p), f(next(p)))
- *     val v = f(next(p)); return Ctor(c(p), v)
- *
- * `return when/if { ... }` expressions are first normalised into per-branch
- * returns so that constructor-wrapping returns inside branches are detected.
- *
- * Detected functions are grouped into strongly-connected components of
- * the call graph. Each SCC is rewritten using destination-passing style
- * (DPS). For each member f a sibling `f$tmcDps(args..., dst)` is
- * synthesised that writes its result into `dst`'s recursive field (via
- * IrSetField on the backing field, sound because Kotlin/Wasm declares
- * all instance fields with `isMutable = true`; see TypeGenerator.kt)
- * and tail-calls the callee's DPS. The original `f` becomes
- * `f(args) = allocate head; callee_dps(args', head); return head`.
- *
- * The DPS bodies are produced by deep-copying the original function
- * body and transforming all IrReturn nodes in place, which preserves
- * arbitrary control flow, saved variables, and via-variable patterns
- * without rebuilding the body from scratch.
- *
- * The annotation is a checked contract. An annotated function that the
- * transformation cannot handle (e.g. cycles spanning multiple files or
- * declaration containers) is a
- * [WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE] compilation error,
- * never a silent fall-through to stack-consuming recursion.
+ * Rewrites `@TailModCons` functions that return a constructor wrapping
+ * a recursive call into destination-passing style (DPS), turning the
+ * recursive call into a tail call. Functions are grouped into SCCs of
+ * the call graph so both self-recursion and mutual recursion are
+ * handled. Untransformable annotated functions are a
+ * [WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE] compilation error.
  */
 internal class WasmTailModConsLowering(private val context: WasmBackendContext) : FileLoweringPass {
 
