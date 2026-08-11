@@ -24,9 +24,11 @@ fun chain(n: Int): Cell? {
     return Cell(n, chain(n - 1))
 }
 
-sealed interface IList
-class ConsA(val head: Int, val tail: IList?) : IList
-class ConsB(val head: Int, val tail: IList?) : IList
+sealed interface IList {
+    val tail: IList?
+}
+class ConsA(val head: Int, override val tail: IList?) : IList
+class ConsB(val head: Int, override val tail: IList?) : IList
 
 // Two-function mutual recursion, each wrapping the other's result in a constructor.
 @TailModCons
@@ -42,10 +44,12 @@ fun mutualB(n: Int): IList? {
 }
 
 // Three-function mutual recursion cycle: triA -> triB -> triC -> triA.
-sealed interface TriList
-class TriConsA(val head: Int, val tail: TriList?) : TriList
-class TriConsB(val head: Int, val tail: TriList?) : TriList
-class TriConsC(val head: Int, val tail: TriList?) : TriList
+sealed interface TriList : IList {
+    override val tail: TriList?
+}
+class TriConsA(val head: Int, override val tail: TriList?) : TriList
+class TriConsB(val head: Int, override val tail: TriList?) : TriList
+class TriConsC(val head: Int, override val tail: TriList?) : TriList
 
 @TailModCons
 fun triA(n: Int): TriList? {
@@ -133,27 +137,7 @@ fun <T> lengthOf(head: T?, next: (T) -> T?): Int {
 fun lengthOfIList(c: IList?): Int {
     var k = 0
     var cur = c
-    while (cur != null) {
-        k++
-        cur = when (cur) {
-            is ConsA -> cur.tail
-            is ConsB -> cur.tail
-        }
-    }
-    return k
-}
-
-fun lengthOfTriList(c: TriList?): Int {
-    var k = 0
-    var cur = c
-    while (cur != null) {
-        k++
-        cur = when (cur) {
-            is TriConsA -> cur.tail
-            is TriConsB -> cur.tail
-            is TriConsC -> cur.tail
-        }
-    }
+    while (cur != null) { k++; cur = cur.tail }
     return k
 }
 
@@ -162,7 +146,7 @@ fun box(): String {
 
     if (lengthOf(chain(depth)) { it.next } != depth) return "fail chain"
     if (lengthOfIList(mutualA(depth)) != depth) return "fail mutual"
-    if (lengthOfTriList(triA(depth)) != depth) return "fail triMutual"
+    if (lengthOfIList(triA(depth)) != depth) return "fail triMutual"
     if (lengthOf(buildTriple("x", depth)) { it.next } != depth) return "fail triple"
     if (lengthOf(revChain(depth)) { it.prev } != depth) return "fail revCell"
     val computed = buildComputed(depth)
