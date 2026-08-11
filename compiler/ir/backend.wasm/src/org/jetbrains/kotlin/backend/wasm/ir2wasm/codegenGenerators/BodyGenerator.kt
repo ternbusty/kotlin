@@ -59,12 +59,17 @@ class BodyGenerator(
      * [WASM_TAIL_CALL] origin. On top of that, the caller's Wasm result type
      * must match the callee's, because `return_call` requires them to be equal.
      */
-    private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
-        if (call.origin !== WASM_TAIL_CALL) return false
+    private fun callerResultTypeMatchesCallee(calleeReturnType: IrType): Boolean {
         val caller = functionContext.irFunction ?: return false
         val callerResultType = wasmModuleTypeTransformer.transformResultType(caller.returnType)
-        val calleeResultType = wasmModuleTypeTransformer.transformResultType(callee.returnType)
+        val calleeResultType = wasmModuleTypeTransformer.transformResultType(calleeReturnType)
         return callerResultType == calleeResultType
+    }
+
+    private fun isEligibleForTailCall(call: IrFunctionAccessExpression, callee: IrFunction): Boolean {
+        if (call.origin !== WASM_TAIL_CALL) return false
+        if (callee is IrConstructor) return false
+        return callerResultTypeMatchesCallee(callee.returnType)
     }
 
     fun WasmExpressionBuilder.buildGetUnit() {
@@ -839,7 +844,15 @@ class BodyGenerator(
             callRefArguments.forEach { generateExpression(it!!) }
             val functionTypeReference = typeCodegenContext.referenceWasmFunctionType(wasmFunctionType)
             generateExpression(call.arguments[0]!!)
-            body.buildInstr(WasmOp.CALL_REF, location, functionTypeReference)
+
+            val isTailCallRef = call.origin === WASM_TAIL_CALL &&
+                callerResultTypeMatchesCallee(resultType)
+            body.buildInstr(
+                if (isTailCallRef) WasmOp.RETURN_CALL_REF else WasmOp.CALL_REF,
+                location,
+                functionTypeReference
+            )
+
             if (resultType.isUnit())
                 body.buildGetUnit()
             return
