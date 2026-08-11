@@ -68,7 +68,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         val allFunctions = mutableListOf<IrSimpleFunction>()
         for (f in annotated) {
             when {
-                f.isTailrec -> reportNotApplicable(irFile, f, "the function is already tailrec; the annotation has no effect there")
+                f.isTailrec -> reportNotApplicable(irFile, f, "the function is already tailrec, the annotation has no effect there")
                 f.body !is IrBlockBody -> reportNotApplicable(irFile, f, "the function has no block body")
                 else -> allFunctions += f
             }
@@ -134,7 +134,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     // -------------------------------------------------------------- self-rec (DPS, body-transforming)
 
-    /** Constructor metadata validated for a DPS rewrite; null when the site is not eligible. */
+    /** Constructor metadata validated for a DPS rewrite. Null when the site is not eligible. */
     private class DpsPrep(val ctorClass: IrClass, val recField: IrField)
 
     private fun prepareDps(func: IrSimpleFunction, site: TmcSite): DpsPrep? {
@@ -181,7 +181,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                 if (expression !== site.returnExpr) return super.visitReturn(expression, data)
                 return builder.irBlock {
                     val head = createTmpVariable(
-                        builder.irCtorWithNullHole(site.ctorCall, site.recursiveArgIndex),
+                        builder.irCtorWithNullPlaceholder(site.ctorCall, site.recursiveArgIndex),
                         nameHint = "tmcHead",
                     )
                     +builder.irCall(fDps.symbol).apply {
@@ -243,7 +243,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                     if (recCall != null) {
                         return builder.irBlock {
                             val cell = createTmpVariable(
-                                builder.irCtorWithNullHole(value, recArgIndex),
+                                builder.irCtorWithNullPlaceholder(value, recArgIndex),
                                 nameHint = "tmcCell",
                             )
                             +builder.irSetField(builder.irGet(dstParam), recField, builder.irGet(cell))
@@ -361,13 +361,13 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
     private fun IrClass.defaultTypeNullable(): IrType = symbol.defaultType.makeNullable()
 
-    /** Allocates [src]'s constructor with a null hole at [holeIndex]; the other arguments are taken from [src] as-is. */
-    private fun IrBuilderWithScope.irCtorWithNullHole(src: IrConstructorCall, holeIndex: Int): IrConstructorCall =
+    /** Allocates [src]'s constructor with a null placeholder at [placeholderIndex]. The other arguments are taken from [src] as-is. */
+    private fun IrBuilderWithScope.irCtorWithNullPlaceholder(src: IrConstructorCall, placeholderIndex: Int): IrConstructorCall =
         irCallConstructor(src.symbol, emptyList()).apply {
             for (i in 0 until src.arguments.size) {
                 arguments[i] = src.arguments[i]
             }
-            arguments[holeIndex] = irNull()
+            arguments[placeholderIndex] = irNull()
         }
 
     private fun createDpsSibling(
