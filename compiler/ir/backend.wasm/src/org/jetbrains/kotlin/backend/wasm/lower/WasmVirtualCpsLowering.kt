@@ -25,6 +25,7 @@ import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.isLocal
+import org.jetbrains.kotlin.ir.util.isOverridable
 import org.jetbrains.kotlin.ir.util.isSubclassOf
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.IrTransformer
@@ -34,30 +35,29 @@ import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.wasm.config.WasmConfigurationKeys
 
 /**
- * Defunctionalized CPS conversion for virtual mutual recursion over a closed
- * class hierarchy, gated behind `-Xwasm-enable-stackless-recursion`.
+ * Defunctionalized CPS conversion for recursive functions, gated behind
+ * `-Xwasm-enable-stackless-recursion`.
  *
- * This pass automatically detects abstract methods whose overrides contain
- * recursive virtual calls back to the same method. No annotation is required.
- * It uses class-hierarchy analysis to collect every override in the module and
- * compiles them into a single flat state machine with heap-allocated frames.
- * Overrides whose bodies the transformation cannot handle fall back to their
- * original virtual dispatch transparently.
+ * Two detection modes run in sequence.
  *
- * Design:
- *  - Auto-detection scans every abstract method in the module; if at least one
- *    concrete override body calls the method virtually, it is a candidate.
- *  - CHA enumerates all overrides of each detected method in the module
- *    (sound under Wasm whole-world compilation).
- *  - Each override body is compiled into a basic-block plan, splitting at
- *    virtual call sites of the target method:
- *      * calls in tail position    -> receiver/state swap, no frame
- *      * non-tail calls            -> heap frame capturing live locals
- *    Unsupported constructs bail out: that override keeps its native body
- *    and the trampoline invokes it as an ordinary virtual call (partial
- *    conversion is always semantics-preserving).
- *  - A single `run$virtualCps` function holds the flat state machine:
- *    while(true) + when(state), state = (override, block) pairs.
+ * Virtual mutual recursion
+ *   Auto-detection scans every abstract method in the module; if at
+ *   least one concrete override body calls the method virtually, it is
+ *   a candidate. CHA enumerates all overrides and compiles them into a
+ *   single flat state machine with heap-allocated frames. Overrides
+ *   whose bodies the transformation cannot handle fall back to their
+ *   original virtual dispatch transparently.
+ *
+ * Concrete self-recursion
+ *   After the virtual pass, every remaining concrete function whose body
+ *   contains a direct call to itself is a candidate. Only effectively
+ *   final functions are transformed (the call target must be statically
+ *   known). Each such function gets its own single-body state machine
+ *   via [SelfRecursionCodegen].
+ *
+ * Both paths share the body planner, frame generation, and the hybrid
+ * depth threshold (native stack below 512 frames, heap-frame trampoline
+ * above).
  */
 internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) : ModuleLoweringPass {
 
@@ -75,11 +75,24 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
 
     override fun lower(irModule: IrModuleFragment) {
         if (!enabled) return
+
+        // Phase 1: virtual mutual recursion (abstract method + overrides).
         val allClasses = collectClasses(irModule)
         val candidates = detectRecursiveVirtualMethods(allClasses)
+        val virtualProcessed = mutableSetOf<IrSimpleFunction>()
         for (pair in candidates) {
-            lowerHierarchy(irModule, pair.first, pair.second, allClasses)
+            val overrides = collectOverrides(pair.first, pair.second, allClasses)
+            virtualProcessed.addAll(overrides.map { it.function })
+            lowerHierarchy(irModule, pair.first, pair.second, overrides)
         }
+
+        // Phase 2: concrete self-recursion.
+        val selfRecursive = detectSelfRecursiveFunctions(irModule, virtualProcessed)
+        for (func in selfRecursive) {
+            lowerSelfRecursive(func)
+        }
+
+        // Phase 3: DeepRecursiveFunction acceleration.
         WasmDrfAcceleration(context).lower(irModule)
     }
 
@@ -228,9 +241,8 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
         irModule: IrModuleFragment,
         base: IrClass,
         baseMethod: IrSimpleFunction,
-        allClasses: List<IrClass>,
+        overrides: List<OverrideInfo>,
     ) {
-        val overrides = collectOverrides(base, baseMethod, allClasses)
         if (overrides.isEmpty()) return
 
         val bailReasons = mutableMapOf<String, String>()
@@ -323,6 +335,99 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
             }
         }, null)
         body.patchDeclarationParents(owner)
+    }
+
+    // ================================================================ self-recursion
+
+    /**
+     * Collects concrete functions that call themselves directly and are
+     * eligible for the self-recursion CPS transform.
+     *
+     * Eligibility requires the function to be effectively final so that
+     * the self-call target is statically known. In Kotlin, member
+     * functions in non-open classes are final by default, and top-level
+     * functions are always non-overridable.
+     *
+     * Functions already processed by the virtual CPS pass are excluded.
+     */
+    private fun detectSelfRecursiveFunctions(
+        irModule: IrModuleFragment,
+        alreadyProcessed: Set<IrSimpleFunction>,
+    ): List<IrSimpleFunction> {
+        val result = mutableListOf<IrSimpleFunction>()
+        irModule.acceptVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+
+            override fun visitSimpleFunction(declaration: IrSimpleFunction) {
+                declaration.acceptChildrenVoid(this)
+                if (declaration in alreadyProcessed) return
+                if (declaration.body == null) return
+                if (declaration.isFakeOverride) return
+                if (declaration.isLocal) return
+                if (declaration.isOverridable) return
+                if (bodyContainsSelfCall(declaration)) {
+                    result += declaration
+                }
+            }
+        })
+        return result
+    }
+
+    private fun bodyContainsSelfCall(func: IrSimpleFunction): Boolean {
+        var found = false
+        func.body?.acceptVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) {
+                if (!found) element.acceptChildrenVoid(this)
+            }
+
+            override fun visitFunction(declaration: IrFunction) {
+                // Do not descend into nested function declarations.
+            }
+
+            override fun visitCall(expression: IrCall) {
+                if (expression.symbol == func.symbol) {
+                    found = true
+                    return
+                }
+                if (!found) expression.acceptChildrenVoid(this)
+            }
+        })
+        return found
+    }
+
+    private fun lowerSelfRecursive(func: IrSimpleFunction) {
+        val original = func.body as? IrBlockBody ?: return
+        val copy = original.deepCopyWithSymbols(func)
+        val isTarget: (IrCall) -> Boolean = { it.symbol == func.symbol }
+        normalizeTargetCallArguments(copy, func, isTarget)
+        val planner = BodyPlanner(func, func, copy, isTarget = isTarget, irBuiltIns = context.irBuiltIns)
+        val plan = planner.plan()
+        if (plan == null) {
+            reportSelfRecursionBailout(func, planner.lastBailReason)
+            return
+        }
+        context.irFactory.stageController.restrictTo(func) {
+            SelfRecursionCodegen(context, func, plan).generate()
+        }
+        reportSelfRecursionSuccess(func, plan)
+    }
+
+    private fun qualName(func: IrSimpleFunction): String = buildString {
+        val parent = func.parent
+        if (parent is IrClass) append("${parent.name}.")
+        append(func.name)
+    }
+
+    private fun reportSelfRecursionBailout(func: IrSimpleFunction, reason: String) {
+        @OptIn(MessageCollectorAccess::class)
+        context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
+            ?.report(CompilerMessageSeverity.LOGGING, "[wasm-self-cps] ${qualName(func)}: bailout ($reason)")
+    }
+
+    private fun reportSelfRecursionSuccess(func: IrSimpleFunction, plan: BodyPlan) {
+        @OptIn(MessageCollectorAccess::class)
+        context.configuration.get(CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY)
+            ?.report(CompilerMessageSeverity.LOGGING, "[wasm-self-cps] ${qualName(func)}: planned (${plan.blocks.size} blocks)")
     }
 
     // ================================================================ diagnostics
