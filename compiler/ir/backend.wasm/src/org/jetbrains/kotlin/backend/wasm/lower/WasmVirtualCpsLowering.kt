@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
+import org.jetbrains.kotlin.ir.util.isLocal
 import org.jetbrains.kotlin.ir.util.isSubclassOf
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.IrTransformer
@@ -139,6 +140,10 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
         var count = 0
         for (cls in allClasses) {
             if (!cls.isSubclassOf(base)) continue
+            // Local/anonymous classes may capture outer-scope variables
+            // that are not yet lowered to fields (LocalDeclarationsLowering
+            // runs later). Their method bodies cannot be planned.
+            if (cls.isLocal) continue
             val override = cls.declarations
                 .filterIsInstance<IrSimpleFunction>()
                 .firstOrNull { fn ->
@@ -204,6 +209,7 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
         val result = mutableListOf<OverrideInfo>()
         for (cls in allClasses) {
             if (!cls.isSubclassOf(base)) continue
+            if (cls.isLocal) continue
             val override = cls.declarations
                 .filterIsInstance<IrSimpleFunction>()
                 .firstOrNull { fn ->
@@ -245,7 +251,9 @@ internal class WasmVirtualCpsLowering(private val context: WasmBackendContext) :
             normalizeTargetCallArguments(copy, info.function) { isTargetCall(it, baseMethod) }
             val planner = BodyPlanner(info.function, baseMethod, copy, irBuiltIns = context.irBuiltIns)
             val plan = planner.plan()
-            if (plan != null) plans += plan else {
+            if (plan != null) {
+                plans += plan
+            } else {
                 bailedOut += info
                 bailReasons[clsName] = planner.lastBailReason
             }

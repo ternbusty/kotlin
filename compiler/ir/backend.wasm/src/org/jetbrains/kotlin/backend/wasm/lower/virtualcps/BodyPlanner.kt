@@ -74,10 +74,74 @@ internal class BodyPlanner(
                 }
                 last.terminator = Terminator.Ret(zero)
             }
-            BodyPlan(OverrideInfo(func.parent as? IrClass, func), blocks.first(), blocks, locals)
+            val plan = BodyPlan(OverrideInfo(func.parent as? IrClass, func), blocks.first(), blocks, locals)
+            validateCaptures(plan)
+            plan
         } catch (b: BailOut) {
             lastBailReason = b.reason
             null
+        }
+    }
+
+    /**
+     * Verifies that every [IrGetValue]/[IrSetValue] in the planned blocks
+     * refers to a symbol declared in [BodyPlan.locals], the function
+     * parameters, or the enclosing block. A missing declaration means the
+     * code generator would produce IR with dangling references.
+     */
+    private fun validateCaptures(plan: BodyPlan) {
+        val declared = mutableSetOf<IrValueSymbol>()
+        for (p in func.parameters) declared += p.symbol
+        for (l in plan.locals) declared += l.symbol
+
+        val declCollector = object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+            override fun visitVariable(declaration: IrVariable) {
+                declared += declaration.symbol
+                declaration.acceptChildrenVoid(this)
+            }
+        }
+
+        fun walkTerminator(term: Terminator?, visitor: IrVisitorVoid) {
+            when (term) {
+                is Terminator.SuspendCall -> term.call.acceptVoid(visitor)
+                is Terminator.TailCall -> term.call.acceptVoid(visitor)
+                is Terminator.Ret -> term.value.acceptVoid(visitor)
+                is Terminator.CondGoto -> term.condition.acceptVoid(visitor)
+                is Terminator.Goto, null -> {}
+            }
+        }
+
+        for (block in plan.blocks) {
+            for (stmt in block.statements) stmt.acceptVoid(declCollector)
+            // Also collect declarations inside terminator expressions
+            // (e.g. IrReturnableBlock with local variables in Ret.value).
+            walkTerminator(block.terminator, declCollector)
+        }
+
+        val missing = mutableSetOf<IrValueSymbol>()
+        val refChecker = object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) = element.acceptChildrenVoid(this)
+            override fun visitGetValue(expression: IrGetValue) {
+                if (expression.symbol !in declared) missing += expression.symbol
+            }
+            override fun visitSetValue(expression: IrSetValue) {
+                if (expression.symbol !in declared) missing += expression.symbol
+                expression.acceptChildrenVoid(this)
+            }
+        }
+        for (block in plan.blocks) {
+            for (stmt in block.statements) stmt.acceptVoid(refChecker)
+            walkTerminator(block.terminator, refChecker)
+        }
+
+        if (missing.isNotEmpty()) {
+            val names = missing.joinToString {
+                (it.owner as? IrVariable)?.name?.asString()
+                    ?: (it.owner as? IrValueParameter)?.name?.asString()
+                    ?: it.toString()
+            }
+            throw BailOut("undeclared variable references: $names")
         }
     }
 
@@ -162,7 +226,12 @@ internal class BodyPlanner(
                         current.statements += stmt
                         return compileAssignmentOf(stmt.symbol, init, current)
                     }
-                    val call = init as? IrCall ?: throw BailOut("target call or return nested in variable initializer ${init::class.simpleName}")
+                    // Inline expansion of scoping functions (.let, .also,
+                    // .run) may wrap the target call in an IMPLICIT_CAST
+                    // from the erased generic type. Peel through it to
+                    // reach the underlying IrCall.
+                    val call = peelTransparentTypeOps(init) as? IrCall
+                        ?: throw BailOut("target call or return nested in variable initializer ${init::class.simpleName}")
                     if (!isTarget(call)) throw BailOut("nested target call")
                     checkArgsHaveNoTargetCalls(call)
                     val resume = newBlock()
@@ -201,17 +270,21 @@ internal class BodyPlanner(
                 }
                 val value = stmt.value
                 if (containsTargetCall(value)) {
-                    when (value) {
+                    // Peel transparent type operators so that structural
+                    // dispatch below reaches IrCall/IrWhen/IrBlock even
+                    // when the inliner has wrapped them in IMPLICIT_CAST.
+                    val peeled = peelTransparentTypeOps(value)
+                    when (peeled) {
                         is IrCall -> {
-                            if (!isTarget(value)) throw BailOut("nested target call")
-                            checkArgsHaveNoTargetCalls(value)
-                            current.terminator = Terminator.TailCall(value)
+                            if (!isTarget(peeled)) throw BailOut("nested target call")
+                            checkArgsHaveNoTargetCalls(peeled)
+                            current.terminator = Terminator.TailCall(peeled)
                             return current
                         }
                         is IrWhen -> {
                             // return when { c1 -> e1; ... }  ==>  when { c1 -> return e1; ... }
-                            val pushed = IrWhenImpl(value.startOffset, value.endOffset, builtIns.unitType, value.origin).apply {
-                                for (branch in value.branches) {
+                            val pushed = IrWhenImpl(peeled.startOffset, peeled.endOffset, builtIns.unitType, peeled.origin).apply {
+                                for (branch in peeled.branches) {
                                     val result = branch.result
                                     val branchBody = if (result.type.isNothing()) {
                                         result
@@ -223,21 +296,21 @@ internal class BodyPlanner(
                             }
                             val end = compileStatement(pushed, current)
                             // A return-when with no else falls through: treat as unreachable end.
-                            if (end.terminator == null) end.terminator = Terminator.Ret(value.asUnreachableDefault())
+                            if (end.terminator == null) end.terminator = Terminator.Ret(peeled.asUnreachableDefault())
                             return end
                         }
                         is IrBlock -> {
-                            if (value is IrReturnableBlock) {
+                            if (peeled is IrReturnableBlock) {
                                 // return <RB>: every return@RB v is a plain return v.
                                 val join = newBlock()
-                                returnableStack.addLast(ReturnableFrame(value.symbol, join, null, returnThrough = true))
-                                val end = compileStatements(value.statements, current)
+                                returnableStack.addLast(ReturnableFrame(peeled.symbol, join, null, returnThrough = true))
+                                val end = compileStatements(peeled.statements, current)
                                 returnableStack.removeLast()
                                 if (end.terminator == null) throw BailOut("returned returnable block falls through")
                                 return join
                             }
                             // return block { s1..sn; last } ==> s1..sn; return last
-                            val stmts = value.statements
+                            val stmts = peeled.statements
                             if (stmts.isEmpty()) throw BailOut("empty block in return")
                             var cur = current
                             for (i in 0 until stmts.size - 1) cur = compileStatement(stmts[i], cur)
@@ -251,7 +324,7 @@ internal class BodyPlanner(
                                 cur,
                             )
                         }
-                        else -> throw BailOut("target call nested in return value ${value::class.simpleName}")
+                        else -> throw BailOut("target call nested in return value ${peeled::class.simpleName}")
                     }
                 }
                 current.terminator = Terminator.Ret(value)
@@ -470,6 +543,22 @@ internal class BodyPlanner(
         loopStack.removeLast()
         return exit
     }
+
+    /**
+     * Recursively strips semantically transparent type operators
+     * (IMPLICIT_CAST, IMPLICIT_COERCION_TO_UNIT) that the inliner
+     * inserts when expanding generic inline functions. Non-transparent
+     * operators (CAST, SAM_CONVERSION, etc.) are left in place.
+     */
+    private fun peelTransparentTypeOps(expr: IrExpression): IrExpression = when {
+        expr is IrTypeOperatorCall && expr.operator in transparentTypeOps -> peelTransparentTypeOps(expr.argument)
+        else -> expr
+    }
+
+    private val transparentTypeOps = setOf(
+        IrTypeOperator.IMPLICIT_CAST,
+        IrTypeOperator.IMPLICIT_COERCION_TO_UNIT,
+    )
 
     private fun checkArgsHaveNoTargetCalls(call: IrCall) {
         for (arg in call.arguments) {
