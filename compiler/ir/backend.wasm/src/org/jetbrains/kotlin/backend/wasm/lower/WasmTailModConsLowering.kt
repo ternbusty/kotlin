@@ -51,24 +51,24 @@ import org.jetbrains.kotlin.ir.visitors.acceptVoid
  * `return when/if { ... }` expressions are first normalised into per-branch
  * returns so that constructor-wrapping returns inside branches are detected.
  *
- * Detected functions are grouped into strongly-connected components of the
- * call graph. SCCs of size 1 or 2 are rewritten using destination-passing
- * style (DPS). For each member f a sibling `f$tmcDps(args..., dst)` is
+ * Detected functions are grouped into strongly-connected components of
+ * the call graph. Each SCC is rewritten using destination-passing style
+ * (DPS). For each member f a sibling `f$tmcDps(args..., dst)` is
  * synthesised that writes its result into `dst`'s recursive field (via
- * IrSetField on the backing field, sound because Kotlin/Wasm declares all
- * instance fields with `isMutable = true`; see TypeGenerator.kt) and
- * tail-calls the peer's DPS. The original `f` becomes
- * `f(args) = allocate head; peer_dps(args', head); return head`.
+ * IrSetField on the backing field, sound because Kotlin/Wasm declares
+ * all instance fields with `isMutable = true`; see TypeGenerator.kt)
+ * and tail-calls the callee's DPS. The original `f` becomes
+ * `f(args) = allocate head; callee_dps(args', head); return head`.
  *
- * The DPS bodies are produced by deep-copying the original function body and
- * transforming all IrReturn nodes in place, which preserves arbitrary control
- * flow, saved variables, and via-variable patterns without rebuilding the body
- * from scratch.
+ * The DPS bodies are produced by deep-copying the original function
+ * body and transforming all IrReturn nodes in place, which preserves
+ * arbitrary control flow, saved variables, and via-variable patterns
+ * without rebuilding the body from scratch.
  *
  * The annotation is a checked contract. An annotated function that the
- * transformation cannot handle (e.g. recursion cycles larger than two
- * functions, or cycles spanning multiple files or declaration containers)
- * is a [WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE] compilation error,
+ * transformation cannot handle (e.g. cycles spanning multiple files or
+ * declaration containers) is a
+ * [WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE] compilation error,
  * never a silent fall-through to stack-consuming recursion.
  */
 internal class WasmTailModConsLowering(private val context: WasmBackendContext) : FileLoweringPass {
@@ -134,7 +134,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                     val selfSite = sitesByFunc.getValue(f).firstOrNull { it.recursiveCall.symbol == f.symbol }
                     if (selfSite != null && trySelfRecDpsTransform(f, selfSite)) transformed += f
                 }
-                2 -> if (tryPairwiseMutualRecTransform(scc, sitesByFunc)) transformed += scc
+                else -> if (tryMutualRecTransform(scc, sitesByFunc)) transformed += scc
             }
         }
 
@@ -146,9 +146,6 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             val reason = when {
                 f !in sitesByFunc -> "no recursive call wrapped in a constructor was found " +
                         "(for mutual recursion, every function in the cycle needs the annotation)"
-                sitesByFunc.getValue(f).none { it.recursiveCall.symbol == f.symbol } &&
-                        sccs.none { f in it && it.size == 2 } ->
-                    "the recursion cycle through this function is larger than two functions, which is not supported yet"
                 else -> "the function's shape is not supported by the transformation"
             }
             reportNotApplicable(irFile, f, reason)
@@ -312,45 +309,77 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         })
     }
 
-    // -------------------------------------------------------------- 2-function mutual-rec
+    // -------------------------------------------------------------- N-function mutual-rec
 
     /**
-     * For an SCC {A, B} where both A and B match the SimpleChainShape and refer to each other,
-     * synthesise A_dps and B_dps with destination-passing style, rewrite the originals to
-     * allocate the head cell and kick off DPS, and use IrSetField on the recursive field's
-     * backing field to mutate.
+     * For an SCC of N functions where each member has a TMC site calling
+     * another member, synthesise a DPS sibling for each function and
+     * rewrite the originals. Each function's DPS helper tail-calls the
+     * callee's DPS helper, forming a cycle that runs in constant stack.
      */
-    private fun tryPairwiseMutualRecTransform(
+    private fun tryMutualRecTransform(
         scc: List<IrSimpleFunction>,
         sitesByFunc: Map<IrSimpleFunction, List<TmcSite>>,
     ): Boolean {
-        val a = scc[0]
-        val b = scc[1]
-        val siteA = sitesByFunc[a]?.firstOrNull { it.recursiveCall.symbol == b.symbol } ?: return false
-        val siteB = sitesByFunc[b]?.firstOrNull { it.recursiveCall.symbol == a.symbol } ?: return false
+        val sccSet = scc.toHashSet()
 
-        val container = a.parent as? IrDeclarationContainer ?: return false
-        if (b.parent !== container) return false
-
-        // Validate both sites cheaply before the expensive deep copies.
-        val prepA = prepareDps(a, siteA) ?: return false
-        val prepB = prepareDps(b, siteB) ?: return false
-        val bodyCopyA = (a.body as IrBlockBody).deepCopyWithSymbols()
-        val bodyCopyB = (b.body as IrBlockBody).deepCopyWithSymbols()
-
-        val aDps = context.irFactory.stageController.restrictTo(a) {
-            createDpsSibling(container, a, dstType = prepB.ctorClass.defaultTypeNullable())
-        }
-        val bDps = context.irFactory.stageController.restrictTo(b) {
-            createDpsSibling(container, b, dstType = prepA.ctorClass.defaultTypeNullable())
+        // For each function in the SCC, find a TMC site calling another SCC member.
+        val siteOf = mutableMapOf<IrSimpleFunction, TmcSite>()
+        val calleeOf = mutableMapOf<IrSimpleFunction, IrSimpleFunction>()
+        for (f in scc) {
+            val site = sitesByFunc[f]?.firstOrNull { it.recursiveCall.symbol.owner in sccSet && it.recursiveCall.symbol.owner != f }
+                ?: return false
+            siteOf[f] = site
+            calleeOf[f] = site.recursiveCall.symbol.owner
         }
 
-        transformOriginalBodyInPlace(a, siteA, bDps)
-        transformOriginalBodyInPlace(b, siteB, aDps)
-        buildDpsBodyFromCopy(aDps, a, bodyCopyA, siteA, prepB.recField, calleeSymbol = b.symbol, peerDps = bDps)
-        buildDpsBodyFromCopy(bDps, b, bodyCopyB, siteB, prepA.recField, calleeSymbol = a.symbol, peerDps = aDps)
-        markTailCalls(aDps)
-        markTailCalls(bDps)
+        // All functions must share the same declaration container.
+        val container = scc[0].parent as? IrDeclarationContainer ?: return false
+        if (scc.any { it.parent !== container }) return false
+
+        // Validate all sites and prepare DPS metadata.
+        val prepOf = mutableMapOf<IrSimpleFunction, DpsPrep>()
+        for (f in scc) {
+            prepOf[f] = prepareDps(f, siteOf.getValue(f)) ?: return false
+        }
+
+        // Deep-copy all bodies before any mutation.
+        val bodyCopies = scc.associateWith { (it.body as IrBlockBody).deepCopyWithSymbols() }
+
+        // Compute callerOf (inverse of calleeOf in the cycle). Each function
+        // has exactly one outgoing TMC edge, so the SCC is a simple cycle and
+        // every node has exactly one predecessor.
+        val callerOf = mutableMapOf<IrSimpleFunction, IrSimpleFunction>()
+        for (f in scc) {
+            callerOf[calleeOf.getValue(f)] = f
+        }
+
+        // Create DPS siblings. f$tmcDps receives the cell allocated by the
+        // function that calls f, so its dst type is callerOf[f]'s constructor.
+        val dpsOf = mutableMapOf<IrSimpleFunction, IrSimpleFunction>()
+        for (f in scc) {
+            val caller = callerOf.getValue(f)
+            val callerPrep = prepOf.getValue(caller)
+            dpsOf[f] = context.irFactory.stageController.restrictTo(f) {
+                createDpsSibling(container, f, dstType = callerPrep.ctorClass.defaultTypeNullable())
+            }
+        }
+
+        // Rewrite original bodies and build DPS bodies.
+        for (f in scc) {
+            val callee = calleeOf.getValue(f)
+            val caller = callerOf.getValue(f)
+            val site = siteOf.getValue(f)
+            val callerPrep = prepOf.getValue(caller)
+            val calleeDps = dpsOf.getValue(callee)
+
+            transformOriginalBodyInPlace(f, site, calleeDps)
+            buildDpsBodyFromCopy(
+                dpsOf.getValue(f), f, bodyCopies.getValue(f), site,
+                callerPrep.recField, calleeSymbol = callee.symbol, peerDps = calleeDps,
+            )
+            markTailCalls(dpsOf.getValue(f))
+        }
 
         return true
     }

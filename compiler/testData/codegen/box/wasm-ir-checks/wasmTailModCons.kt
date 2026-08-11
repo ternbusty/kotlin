@@ -41,6 +41,30 @@ fun mutualB(n: Int): IList? {
     return ConsB(n, mutualA(n - 1))
 }
 
+// Three-function mutual recursion cycle: triA -> triB -> triC -> triA.
+sealed interface TriList
+class TriConsA(val head: Int, val tail: TriList?) : TriList
+class TriConsB(val head: Int, val tail: TriList?) : TriList
+class TriConsC(val head: Int, val tail: TriList?) : TriList
+
+@TailModCons
+fun triA(n: Int): TriList? {
+    if (n == 0) return null
+    return TriConsA(n, triB(n - 1))
+}
+
+@TailModCons
+fun triB(n: Int): TriList? {
+    if (n == 0) return null
+    return TriConsB(n, triC(n - 1))
+}
+
+@TailModCons
+fun triC(n: Int): TriList? {
+    if (n == 0) return null
+    return TriConsC(n, triA(n - 1))
+}
+
 // Multi-parameter with 3-arg constructor and non-Int types.
 class Triple(val tag: String, val value: Int, val next: Triple?)
 
@@ -119,11 +143,26 @@ fun lengthOfIList(c: IList?): Int {
     return k
 }
 
+fun lengthOfTriList(c: TriList?): Int {
+    var k = 0
+    var cur = c
+    while (cur != null) {
+        k++
+        cur = when (cur) {
+            is TriConsA -> cur.tail
+            is TriConsB -> cur.tail
+            is TriConsC -> cur.tail
+        }
+    }
+    return k
+}
+
 fun box(): String {
     val depth = 500_000
 
     if (lengthOf(chain(depth)) { it.next } != depth) return "fail chain"
     if (lengthOfIList(mutualA(depth)) != depth) return "fail mutual"
+    if (lengthOfTriList(triA(depth)) != depth) return "fail triMutual"
     if (lengthOf(buildTriple("x", depth)) { it.next } != depth) return "fail triple"
     if (lengthOf(revChain(depth)) { it.prev } != depth) return "fail revCell"
     val computed = buildComputed(depth)
