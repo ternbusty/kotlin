@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.ir.declarations.IrDeclaration
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.types.isNothing
+import org.jetbrains.kotlin.ir.types.isNullableAny
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
@@ -38,6 +39,12 @@ internal class WasmBoxUnboxEliminationLowering(private val context: WasmBackendC
             override fun visitCall(expression: IrCall): IrExpression {
                 expression.transformChildrenVoid(this)
                 if (expression.symbol != boxIntrinsic) return expression
+                // The elimination is only safe when the box target type is Any?,
+                // because the initializer returns (ref null AnyHeap) at the Wasm
+                // level. For narrower target types like Number, the Wasm heap
+                // types differ and the validator would reject the module.
+                val boxTargetType = expression.typeArguments[1] ?: return expression
+                if (!boxTargetType.isNullableAny()) return expression
                 val arg = expression.arguments[0] ?: return expression
                 return extractBoxedValue(arg) ?: expression
             }
