@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.test.directives.JvmEnvironmentConfigurationDirective
 import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.DISABLE_WASM_EXCEPTION_HANDLING
+import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.ENABLE_TAIL_CALLS
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.USE_NEW_EXCEPTION_HANDLING_PROPOSAL
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.USE_OLD_EXCEPTION_HANDLING_PROPOSAL
 import org.jetbrains.kotlin.test.directives.model.DirectivesContainer
@@ -82,6 +83,7 @@ class WasmGroupingTestIsolator(testServices: TestServices) : GroupingTestIsolato
 
         val specificTokens = listOfNotNull(
             computeEHToken(moduleStructure),
+            computeTailCallsToken(moduleStructure),
             computeLanguageSettingsToken(moduleStructure),
             computeToggledCheckersToken(moduleStructure.allDirectives),
         )
@@ -100,6 +102,9 @@ class WasmGroupingTestIsolator(testServices: TestServices) : GroupingTestIsolato
         ).firstNotNullOfOrNull { [directive, token] ->
             token.takeIf { directive in moduleStructure.allDirectives }
         }
+
+    private fun computeTailCallsToken(moduleStructure: TestModuleStructure): BatchToken? =
+        Custom("tail calls").takeIf { ENABLE_TAIL_CALLS in moduleStructure.allDirectives }
 
     private fun computeLanguageSettingsToken(moduleStructure: TestModuleStructure): BatchToken? {
         val languageFeatures = moduleStructure.allDirectives[LanguageSettingsDirectives.LANGUAGE].sorted()
