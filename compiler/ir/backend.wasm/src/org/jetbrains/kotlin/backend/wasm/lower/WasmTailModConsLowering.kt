@@ -416,6 +416,11 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
                 // Don't descend into nested local functions.
             }
 
+            override fun visitTry(aTry: IrTry, data: Unit) {
+                // Calls inside try-catch are never tail calls, so a DPS
+                // helper generated from such a site would still overflow.
+            }
+
             override fun visitReturn(expression: IrReturn, data: Unit) {
                 if (expression.returnTargetSymbol != selfSymbol) {
                     expression.acceptChildren(this, Unit)
