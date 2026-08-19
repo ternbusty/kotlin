@@ -92,6 +92,10 @@ object WasmConfigurationKeys {
     @JvmField
     val WASM_ENABLE_TAIL_CALLS = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_TAIL_CALLS")
 
+    // Rewrite recursive functions into heap-frame trampolines via CPS conversion.
+    @JvmField
+    val WASM_ENABLE_STACKLESS_RECURSION = CompilerConfigurationKey.create<Boolean>("WASM_ENABLE_STACKLESS_RECURSION")
+
 }
 
 var CompilerConfiguration.wasmEnableArrayRangeChecks: Boolean
@@ -181,4 +185,8 @@ var CompilerConfiguration.wasmTestBoxFunctionToExport: FqName?
 var CompilerConfiguration.wasmEnableTailCalls: Boolean
     get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS)
     set(value) { put(WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS, value) }
+
+var CompilerConfiguration.wasmEnableStacklessRecursion: Boolean
+    get() = getBoolean(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION)
+    set(value) { put(WasmConfigurationKeys.WASM_ENABLE_STACKLESS_RECURSION, value) }
 

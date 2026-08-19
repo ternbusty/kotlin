@@ -12,6 +12,8 @@ import org.jetbrains.kotlin.test.directives.JvmEnvironmentConfigurationDirective
 import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.DISABLE_WASM_EXCEPTION_HANDLING
+import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.ENABLE_STACKLESS_RECURSION
+import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.ENABLE_TAIL_CALLS
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.USE_NEW_EXCEPTION_HANDLING_PROPOSAL
 import org.jetbrains.kotlin.test.directives.WasmEnvironmentConfigurationDirectives.USE_OLD_EXCEPTION_HANDLING_PROPOSAL
 import org.jetbrains.kotlin.test.directives.model.DirectivesContainer
@@ -82,6 +84,7 @@ class WasmGroupingTestIsolator(testServices: TestServices) : GroupingTestIsolato
 
         val specificTokens = listOfNotNull(
             computeEHToken(moduleStructure),
+            computeCompilerFlagsToken(moduleStructure),
             computeLanguageSettingsToken(moduleStructure),
             computeToggledCheckersToken(moduleStructure.allDirectives),
         )
@@ -97,6 +100,14 @@ class WasmGroupingTestIsolator(testServices: TestServices) : GroupingTestIsolato
             DISABLE_WASM_EXCEPTION_HANDLING to Custom("disabled EH"),
             USE_NEW_EXCEPTION_HANDLING_PROPOSAL to Custom("new EH"),
             USE_OLD_EXCEPTION_HANDLING_PROPOSAL to Custom("old EH"),
+        ).firstNotNullOfOrNull { [directive, token] ->
+            token.takeIf { directive in moduleStructure.allDirectives }
+        }
+
+    private fun computeCompilerFlagsToken(moduleStructure: TestModuleStructure): BatchToken? =
+        mapOf(
+            ENABLE_TAIL_CALLS to Custom("tail calls"),
+            ENABLE_STACKLESS_RECURSION to Custom("stackless recursion"),
         ).firstNotNullOfOrNull { [directive, token] ->
             token.takeIf { directive in moduleStructure.allDirectives }
         }

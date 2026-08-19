@@ -17,6 +17,8 @@ where advanced options include:
   -Xwasm-enable-array-range-checks
                              Turn on range checks for array access functions.
   -Xwasm-enable-asserts      Turn on asserts.
+  -Xwasm-enable-stackless-recursion
+                             Rewrite recursive functions into heap-frame trampolines via CPS conversion.
   -Xwasm-enable-tail-calls   Emit WebAssembly tail call instructions (return_call / return_call_indirect).
   -Xwasm-generate-closed-world-multimodule
                              Compile modules in multi-module closed-world mode using module passed in `-include` argument as main module
