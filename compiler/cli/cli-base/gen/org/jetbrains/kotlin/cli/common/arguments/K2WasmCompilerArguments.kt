@@ -115,6 +115,16 @@ sealed class K2WasmCompilerArguments : CommonJsAndWasmCompilerArguments() {
         }
 
     @Argument(
+        value = "-Xwasm-enable-stackless-recursion",
+        description = "Rewrite recursive functions into heap-frame trampolines via CPS conversion.",
+    )
+    var wasmEnableStacklessRecursion: Boolean = false
+        set(value) {
+            checkFrozen()
+            field = value
+        }
+
+    @Argument(
         value = "-Xwasm-enable-tail-calls",
         description = "Emit WebAssembly tail call instructions (return_call / return_call_indirect).",
     )
