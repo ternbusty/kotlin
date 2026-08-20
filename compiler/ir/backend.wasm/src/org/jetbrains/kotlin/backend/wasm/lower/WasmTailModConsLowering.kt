@@ -39,19 +39,36 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
 
 /**
- * Rewrites `@TailModCons` functions that return a constructor wrapping
- * a recursive call into destination-passing style (DPS), turning the
- * recursive call into a tail call. Functions are grouped into SCCs of
- * the call graph so both self-recursion and mutual recursion are
- * handled. Untransformable annotated functions are a
- * [WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE] compilation error.
+ * Rewrites `@TailModCons` functions so that a constructor wrapping a
+ * recursive call becomes a tail call via destination-passing style.
+ *
+ * Given:
+ * ```kotlin
+ * @TailModCons
+ * fun replicate(n: Int, x: String): ConsList<String> =
+ *     if (n == 0) Nil else Cons(x, replicate(n - 1, x))
+ * ```
+ *
+ * The `Cons(x, replicate(...))` return is split into two steps:
+ * 1. Allocate `Cons(x, null)` and return it as the result.
+ * 2. A private DPS helper receives the allocated node and fills its
+ *    `tail` field by tail-calling itself for the next level.
+ *
+ * The recursion in step 2 is in tail position, so Wasm tail calls
+ * eliminate the stack growth.
+ *
+ * Functions are grouped into strongly connected components of the call
+ * graph, so mutual recursion is handled the same way. Annotated
+ * functions that cannot be transformed are a compilation error
+ * ([WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE]).
+ *
+ * @see <a href="https://dl.acm.org/doi/10.1145/3704915">
+ *   Tail Modulo Cons (Allain et al., POPL 2025)</a>
  */
 internal class WasmTailModConsLowering(private val context: WasmBackendContext) : FileLoweringPass {
 
     override fun lower(irFile: IrFile) {
         val annotated = mutableListOf<IrSimpleFunction>()
-        // The walk must descend into bodies: local functions can carry the
-        // annotation too, and the checked contract owes them an error as well.
         irFile.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
                 element.acceptChildrenVoid(this)
@@ -76,18 +93,12 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
 
         val transformed = mutableSetOf<IrSimpleFunction>()
 
-        // `return when/if` bodies are normalised into per-branch returns so that
-        // constructor-wrapping returns inside branches are detected. Annotated
-        // functions that still end up untransformed are a compilation error, so
-        // normalising unconditionally never churns IR that ships.
         for (f in allFunctions) {
             normalizeReturnWhen(f)
         }
 
-        // Only calls to functions of this file can form transformable cycles.
         val fileFunctions = allFunctions.toHashSet()
 
-        // Collect TMC sites per function and build edges (caller -> callee) within the file.
         val sitesByFunc = mutableMapOf<IrSimpleFunction, List<TmcSite>>()
         for (f in allFunctions) {
             val sites = collectTmcSites(f).filter { it.recursiveCall.symbol.owner in fileFunctions }
@@ -113,9 +124,6 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
             }
         }
 
-        // The annotation is a checked contract: an annotated function that the
-        // transformation cannot handle is a compilation error, never a silent
-        // fall-through to stack-consuming recursion.
         for (f in allFunctions) {
             if (f in transformed) continue
             val reason = when {
@@ -160,6 +168,12 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         return true
     }
 
+    /**
+     * Replaces the TMC return site in the original function with:
+     *   val head = Ctor(arg1, ..., null)   // null at recursive position
+     *   fDps(recursiveArgs..., head)        // DPS helper fills the hole
+     *   return head
+     */
     private fun transformOriginalBodyInPlace(
         func: IrSimpleFunction,
         site: TmcSite,
@@ -449,7 +463,7 @@ internal class WasmTailModConsLowering(private val context: WasmBackendContext) 
         return results
     }
 
-    // -------------------------------------------------------------- SCC (Tarjan)
+    // -------------------------------------------------------------- SCC detection
 
     private fun computeSccs(
         nodes: List<IrSimpleFunction>,
