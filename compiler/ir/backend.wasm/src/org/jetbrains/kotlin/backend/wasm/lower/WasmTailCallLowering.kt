@@ -23,6 +23,10 @@ val WASM_TAIL_CALL by IrStatementOriginImpl
  * [BodyGenerator][org.jetbrains.kotlin.backend.wasm.ir2wasm.codegenGenerators.BodyGenerator]
  * can emit `return_call` / `return_call_ref` without re-analysing the IR.
  *
+ * Gated by [WasmConfigurationKeys.WASM_ENABLE_TAIL_CALLS]. Lowerings that
+ * synthesise functions requiring `return_call` independently of the flag
+ * (e.g. TMC DPS helpers) call [markTailCalls] on those functions directly.
+ *
  * Must run after all lowerings that may wrap calls in blocks, try-catch, or
  * continuation machinery, so that the structural tail-position analysis sees
  * the final IR shape. Placed at the very end of the Wasm lowering pipeline.
@@ -38,7 +42,7 @@ internal class WasmTailCallLowering(context: WasmBackendContext) : BodyLoweringP
     }
 }
 
-private fun markTailCalls(irFunction: IrFunction) {
+internal fun markTailCalls(irFunction: IrFunction) {
     val isUnitReturn = irFunction.returnType.isUnit()
 
     val visitor = object : IrVisitor<Unit, Boolean>() {

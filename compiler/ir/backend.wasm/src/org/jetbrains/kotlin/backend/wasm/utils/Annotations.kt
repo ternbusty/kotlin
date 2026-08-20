@@ -33,9 +33,13 @@ private val jsFunFqName = FqName("kotlin.JsFun")
 private val jsPrimitiveFqName = FqName("kotlin.wasm.internal.JsPrimitive")
 private val wasmExportFqName = FqName("kotlin.wasm.WasmExport")
 private val jsBuiltinFqName = FqName("kotlin.wasm.internal.JsBuiltin")
+private val tailModConsFqName = FqName("kotlin.wasm.TailModCons")
 
 fun IrAnnotationContainer.hasExcludedFromCodegenAnnotation(): Boolean =
     hasAnnotation(excludedFromCodegenFqName)
+
+fun IrAnnotationContainer.hasTailModConsAnnotation(): Boolean =
+    hasAnnotation(tailModConsFqName)
 
 fun IrAnnotationContainer.getWasmCoroutineMode(): Boolean? =
     getAnnotation(wasmCoroutineModeFqName)?.getConstArgument("isStackSwitchingMode")

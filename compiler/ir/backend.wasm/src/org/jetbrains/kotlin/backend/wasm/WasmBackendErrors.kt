@@ -5,15 +5,20 @@
 
 package org.jetbrains.kotlin.backend.wasm
 
+import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.diagnostics.KtDiagnosticFactoryToRendererMap
 import org.jetbrains.kotlin.diagnostics.KtDiagnosticsContainer
 import org.jetbrains.kotlin.diagnostics.KtSourcelessDiagnosticFactory
+import org.jetbrains.kotlin.diagnostics.error1
+import org.jetbrains.kotlin.diagnostics.rendering.CommonRenderers
 import org.jetbrains.kotlin.diagnostics.rendering.BaseDiagnosticRendererFactory
 import org.jetbrains.kotlin.diagnostics.rendering.BaseSourcelessDiagnosticRendererFactory.Companion.MESSAGE_PLACEHOLDER
 import org.jetbrains.kotlin.diagnostics.strongWarningWithoutSource
 
 object WasmBackendErrors : KtDiagnosticsContainer() {
     val WASM_BACKEND_MISSING_CUSTOM_FORMATTERS: KtSourcelessDiagnosticFactory by strongWarningWithoutSource()
+
+    val TAIL_MOD_CONS_NOT_APPLICABLE by error1<PsiElement, String>()
 
     override fun getRendererFactory(): BaseDiagnosticRendererFactory {
         return KtDefaultWasmErrorMessages
@@ -23,5 +28,10 @@ object WasmBackendErrors : KtDiagnosticsContainer() {
 object KtDefaultWasmErrorMessages : BaseDiagnosticRendererFactory() {
     override val MAP by KtDiagnosticFactoryToRendererMap("KT") { map ->
         map.put(WasmBackendErrors.WASM_BACKEND_MISSING_CUSTOM_FORMATTERS, MESSAGE_PLACEHOLDER)
+        map.put(
+            WasmBackendErrors.TAIL_MOD_CONS_NOT_APPLICABLE,
+            "''@TailModCons'' cannot be honored: {0}",
+            CommonRenderers.STRING,
+        )
     }
 }
