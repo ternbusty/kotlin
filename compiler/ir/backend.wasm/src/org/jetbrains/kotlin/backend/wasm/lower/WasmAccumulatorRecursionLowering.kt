@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.backend.common.FileLoweringPass
 import org.jetbrains.kotlin.backend.common.ir.ValueRemapper
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.wasm.WasmBackendContext
+import org.jetbrains.kotlin.backend.wasm.utils.hasAssociativeOpAnnotation
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrElement
@@ -20,7 +21,6 @@ import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.classifierOrFail
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
-import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.IrTransformer
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
@@ -33,8 +33,10 @@ import org.jetbrains.kotlin.wasm.config.wasmEnableTailCalls
  * Rewrites `return <other> op self(...)` into accumulator-passing form so
  * that the self-call lands in tail position for [WasmTailCallLowering].
  *
- * Supported operators: `plus`, `times`, `and`, `or`, `xor` on Int/Long,
- * and `plus` on String.
+ * Eligible operators are those annotated with `@AssociativeOp` in the
+ * standard library. The annotation asserts that the operation is associative,
+ * which is the algebraic property required for this transformation to
+ * preserve semantics.
  */
 internal class WasmAccumulatorRecursionLowering(
     private val context: WasmBackendContext,
@@ -65,43 +67,11 @@ internal class WasmAccumulatorRecursionLowering(
         val recOnRight: Boolean,
     )
 
-    private val accumOpNames = setOf("plus", "times", "and", "or", "xor")
-
-    // After inline class lowering, Int.plus(other) becomes Int__plus-impl(self, other).
-    private val mangledOpPattern = Regex("^(Int|Long)__([a-z]+)-impl$")
-
     private fun isAccumOp(call: IrCall, classifier: Any?): Boolean {
         val owner = call.symbol.owner
-        val nameStr = owner.name.asString()
-
-        // Post-lowering static form: Int__plus-impl, Long__xor-impl, etc.
-        val match = mangledOpPattern.matchEntire(nameStr)
-        if (match != null) {
-            val opName = match.groupValues[2]
-            if (opName !in accumOpNames) return false
-            if (owner.parameters.size != 2) return false
-            return owner.returnType.classifierOrFail == classifier &&
-                    owner.parameters.all { it.type.classifierOrFail == classifier }
-        }
-
-        if (nameStr !in accumOpNames) return false
-        val parentClass = owner.parentClassOrNull ?: return false
-
-        // Int/Long member form (kept for robustness).
-        if (parentClass.symbol == context.irBuiltIns.intClass ||
-            parentClass.symbol == context.irBuiltIns.longClass
-        ) {
-            if (owner.parameters.size != 2) return false
-            return owner.returnType.classifierOrFail == classifier &&
-                    owner.parameters.all { it.type.classifierOrFail == classifier }
-        }
-
-        // String.plus(Any?): String
-        if (nameStr == "plus" && parentClass.symbol == context.irBuiltIns.stringClass) {
-            return owner.returnType.classifierOrFail == classifier
-        }
-
-        return false
+        if (!owner.hasAssociativeOpAnnotation()) return false
+        if (owner.parameters.size < 2) return false
+        return owner.returnType.classifierOrFail == classifier
     }
 
     // Left-recursive operand must be pure (evaluation order changes after the rewrite).
@@ -110,11 +80,6 @@ internal class WasmAccumulatorRecursionLowering(
 
     private fun collectAccumSites(func: IrSimpleFunction): List<AccumSite>? {
         val classifier = func.returnType.classifierOrFail
-        if (classifier != context.irBuiltIns.intClass &&
-            classifier != context.irBuiltIns.longClass &&
-            classifier != context.irBuiltIns.stringClass
-        ) return null
-
         val selfSymbol = func.symbol
         val sites = mutableListOf<AccumSite>()
         var totalSelfCalls = 0
