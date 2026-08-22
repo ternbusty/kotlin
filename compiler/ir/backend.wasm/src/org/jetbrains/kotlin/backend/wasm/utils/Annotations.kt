@@ -33,7 +33,7 @@ private val jsFunFqName = FqName("kotlin.JsFun")
 private val jsPrimitiveFqName = FqName("kotlin.wasm.internal.JsPrimitive")
 private val wasmExportFqName = FqName("kotlin.wasm.WasmExport")
 private val jsBuiltinFqName = FqName("kotlin.wasm.internal.JsBuiltin")
-private val associativeOpFqName = FqName("kotlin.internal.AssociativeOp")
+private val associativeOpFqName = FqName("kotlin.wasm.internal.AssociativeOp")
 
 fun IrAnnotationContainer.hasExcludedFromCodegenAnnotation(): Boolean =
     hasAnnotation(excludedFromCodegenFqName)

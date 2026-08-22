@@ -33,15 +33,3 @@ internal annotation class PlatformDependent
 @Retention(AnnotationRetention.BINARY)
 @SinceKotlin("1.7")
 internal annotation class IntrinsicConstEvaluation
-
-/**
- * Marks an operator as associative, allowing the compiler to rewrite
- * `return x op f(...)` into accumulator-passing form so that the
- * recursive call lands in tail position.
- *
- * The annotated function must satisfy `op(a, op(b, c)) == op(op(a, b), c)`
- * for all values of the operand type.
- */
-@Target(AnnotationTarget.FUNCTION)
-@Retention(AnnotationRetention.BINARY)
-internal annotation class AssociativeOp
