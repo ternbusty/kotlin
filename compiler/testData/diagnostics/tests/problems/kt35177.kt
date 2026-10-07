@@ -1,4 +1,4 @@
-// RUN_PIPELINE_TILL: BACKEND
+// RUN_PIPELINE_TILL: CODEGEN
 // ISSUE: KT-35177
 // WITH_STDLIB
 // FULL_JDK
@@ -16,13 +16,13 @@ fun getColor() = Color.RED
 fun test() {
     val color = getColor()
 
-    when (Optional.ofNullable(color).orElse(Color.BLUE)) {
+    <!WHEN_SUBJECT_CAN_BE_NULL_IN_JAVA!>when<!> (Optional.ofNullable(color).orElse(Color.BLUE)) {
         Color.RED   -> println("red")
         Color.BLUE  -> println("blue")
         Color.GREEN -> println("green")
     }
 
-    when (Optional.ofNullable(Color.RED).orElse(Color.BLUE)) {
+    <!WHEN_SUBJECT_CAN_BE_NULL_IN_JAVA!>when<!> (Optional.ofNullable(Color.RED).orElse(Color.BLUE)) {
         Color.RED   -> println("red")
         Color.BLUE  -> println("blue")
         Color.GREEN -> println("green")

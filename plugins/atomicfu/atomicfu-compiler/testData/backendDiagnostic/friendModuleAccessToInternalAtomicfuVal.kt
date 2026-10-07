@@ -1,4 +1,4 @@
-// RUN_PIPELINE_TILL: BACKEND
+// RUN_PIPELINE_TILL: CODEGEN
 // DIAGNOSTICS: -NOTHING_TO_INLINE
 // DISABLE_IR_VISIBILITY_CHECKS: NATIVE
 // ^^^ Because AtomicFU plugin generates an IR property reference node that refers to a private property, KT-85180.
@@ -33,12 +33,12 @@ import kotlinx.atomicfu.*
 fun box(): String {
     <!LEAKED_VOLATILE_FIELD!>a<!>.value
     set()
-    compareAndSet(1, 2)
+    <!LEAKED_VOLATILE_FIELD!>compareAndSet(1, 2)<!>
 
     val c = C()
     c.<!LEAKED_VOLATILE_FIELD!>a<!>.value
     c.getAndSet(1)
-    c.getAndAdd(2)
+    c.<!LEAKED_VOLATILE_FIELD!>getAndAdd(2)<!>
 
     return "OK"
 }

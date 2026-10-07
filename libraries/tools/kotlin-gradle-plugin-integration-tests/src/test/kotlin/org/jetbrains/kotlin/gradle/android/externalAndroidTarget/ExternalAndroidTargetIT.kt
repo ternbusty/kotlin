@@ -31,9 +31,6 @@ import kotlin.test.fail
 @AndroidTestVersions(
     maxVersion = TestVersions.AGP.AGP_813,
     additionalVersions = [
-        TestVersions.AGP.AGP_85,
-        TestVersions.AGP.AGP_86,
-        TestVersions.AGP.AGP_87,
         TestVersions.AGP.AGP_88,
         TestVersions.AGP.AGP_89,
         TestVersions.AGP.AGP_810,
@@ -216,6 +213,49 @@ class ExternalAndroidTargetIT : KGPBaseTest() {
                 if (compileJvmArguments.pluginClasspaths.orEmpty().any { File(it).name == parcelizeJar }) {
                     fail("Expected '$parcelizeJar' to NOT be passed as a plugin classpath to the Kotlin compiler for :compileKotlinJvm")
                 }
+            }
+        }
+    }
+
+    @AndroidTestVersions(minVersion = TestVersions.AGP.AGP_811)
+    @GradleAndroidTest
+    fun `parcelize runtime annotations are available in commonMain`(
+        gradleVersion: GradleVersion, androidVersion: String, jdkVersion: JdkVersions.ProvidedJdk,
+    ) {
+        project(
+            "android-multiplatorm-library-with-parcelize",
+            gradleVersion,
+            buildOptions = defaultBuildOptions.copy(androidVersion = androidVersion),
+            buildJdk = jdkVersion.location,
+        ) {
+            kotlinSourcesDir("commonMain").source("com/example/shared/model/CommonParcelized.kt") {
+                """
+                    package com.example.shared.model
+
+                    import com.example.shared.Parcelable
+                    import kotlinx.parcelize.DataClass
+                    import kotlinx.parcelize.Experimental
+                    import kotlinx.parcelize.IgnoredOnParcel
+                    import kotlinx.parcelize.Parcelize
+                    import kotlinx.parcelize.RawValue
+
+                    @OptIn(Experimental::class)
+                    @Parcelize
+                    data class CommonParcelized(
+                        val rawValue: @RawValue Any? = null,
+                        val nested: @DataClass Nested = Nested(),
+                    ) : Parcelable {
+                        @IgnoredOnParcel
+                        val ignored: String
+                            get() = "ignored"
+                    }
+
+                    data class Nested(val value: String = "")
+                """.trimIndent()
+            }
+
+            build("assemble") {
+                assertTasksExecuted(":compileAndroidMain", ":compileKotlinJvm")
             }
         }
     }

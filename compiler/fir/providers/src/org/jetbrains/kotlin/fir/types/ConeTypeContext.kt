@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.fir.symbols.asCone
 import org.jetbrains.kotlin.fir.symbols.impl.*
 import org.jetbrains.kotlin.fir.symbols.lazyResolveToPhase
 import org.jetbrains.kotlin.fir.utils.exceptions.withFirLookupTagEntry
+import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.FqNameUnsafe
 import org.jetbrains.kotlin.name.Name
@@ -224,7 +225,8 @@ interface ConeTypeContext : TypeSystemContext, TypeSystemOptimizationContext, Ty
         return when (this) {
             is ConeCapturedTypeConstructor,
             is ConeTypeVariableTypeConstructor,
-            is ConeIntersectionType
+            is ConeIntersectionType,
+            is ConeUnionType,
                 -> 0
             is ConeClassifierLookupTag -> {
                 when (val symbol = toSymbol(session)) {
@@ -276,12 +278,29 @@ interface ConeTypeContext : TypeSystemContext, TypeSystemOptimizationContext, Ty
             }
             is ConeCapturedTypeConstructor -> supertypes.orEmpty()
             is ConeIntersectionType -> intersectedTypes
+            is ConeUnionType -> if (primaryType.canBeNull(session)) {
+                [session.builtinTypes.nullableAnyType.coneType]
+            } else {
+                [session.builtinTypes.anyType.coneType]
+            }
             is ConeIntegerLiteralType -> supertypes
         }
     }
 
     override fun TypeConstructorMarker.isIntersection(): Boolean {
         return this is ConeIntersectionType
+    }
+
+    override fun TypeConstructorMarker.isUnion(): Boolean {
+        return this is ConeUnionType
+    }
+
+    override fun TypeConstructorMarker.getPrimaryTypeOfUnion(): KotlinTypeMarker? {
+        return (this as? ConeUnionType)?.primaryType
+    }
+
+    override fun TypeConstructorMarker.getRichErrorsOfUnion(): List<KotlinTypeMarker> {
+        return (this as? ConeUnionType)?.richErrorTypes.orEmpty()
     }
 
     override fun TypeConstructorMarker.isClassTypeConstructor(): Boolean {
@@ -335,6 +354,7 @@ interface ConeTypeContext : TypeSystemContext, TypeSystemOptimizationContext, Ty
         require(this is ConeTypeConstructorMarker)
         return when (this) {
             is ConeClassifierLookupTag -> this !is ConeClassLikeErrorLookupTag
+            is ConeUnionType -> true
 
             is ConeStubTypeConstructor,
             is ConeCapturedTypeConstructor,
@@ -376,16 +396,12 @@ interface ConeTypeContext : TypeSystemContext, TypeSystemOptimizationContext, Ty
         return a.typeArguments === b.typeArguments
     }
 
-    override fun TypeConstructorMarker.isAnyConstructor(): Boolean {
-        return this is ConeClassLikeLookupTag && classId == StandardClassIds.Any
+    override fun TypeConstructorMarker.isClassWithId(classId: ClassId): Boolean {
+        return this is ConeClassLikeLookupTag && this.classId == classId
     }
 
-    override fun TypeConstructorMarker.isNothingConstructor(): Boolean {
-        return this is ConeClassLikeLookupTag && classId == StandardClassIds.Nothing
-    }
-
-    override fun TypeConstructorMarker.isArrayConstructor(): Boolean {
-        return this is ConeClassLikeLookupTag && classId == StandardClassIds.Array
+    override fun TypeConstructorMarker.isRichErrorClass(): Boolean {
+        return toFirRegularClass()?.isRichError == true
     }
 
     override fun KotlinTypeMarker.withNewTypeSince(languageFeature: Any, newType: KotlinTypeMarker): ConeKotlinType {
@@ -404,6 +420,7 @@ interface ConeTypeContext : TypeSystemContext, TypeSystemOptimizationContext, Ty
             is ConeCapturedType -> true
             is ConeTypeVariableType -> false
             is ConeIntersectionType -> false
+            is ConeUnionType -> false
             is ConeIntegerLiteralType -> true
             is ConeStubType -> true
             is ConeDefinitelyNotNullType -> true

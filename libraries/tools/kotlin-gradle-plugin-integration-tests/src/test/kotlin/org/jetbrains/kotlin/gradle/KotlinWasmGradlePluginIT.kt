@@ -6,6 +6,7 @@
 package org.jetbrains.kotlin.gradle
 
 import org.gradle.api.provider.Provider
+import org.gradle.kotlin.dsl.kotlin
 import org.gradle.kotlin.dsl.withType
 import org.gradle.testkit.runner.BuildResult
 import org.gradle.util.GradleVersion
@@ -28,6 +29,7 @@ import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnPlugin
 import org.jetbrains.kotlin.gradle.targets.wasm.yarn.WasmYarnRootEnvSpec
 import org.jetbrains.kotlin.gradle.testbase.*
+import org.jetbrains.kotlin.gradle.uklibs.applyMultiplatform
 import org.jetbrains.kotlin.gradle.util.replaceText
 import org.jetbrains.kotlin.test.TestMetadata
 import org.junit.jupiter.api.DisplayName
@@ -47,7 +49,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         jsTargetWithBrowser(gradleVersion, 1)
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @DisplayName("Check js target with binaryen per-module closed world")
     @GradleTest
     fun jsTargetWithBinaryenPerModuleClosedWorld(gradleVersion: GradleVersion) {
@@ -130,7 +131,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @DisplayName("Check js target per-module closed world dev only")
     @TestMetadata(value = "new-mpp-wasm-js")
     @GradleTest
@@ -208,7 +208,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @DisplayName("Check js target with per-module closed world incremental build with rerun tasks")
     @GradleTest
     fun jsTargetPerModuleClosedWorldWithRerunTasks(gradleVersion: GradleVersion) {
@@ -261,7 +260,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @DisplayName("Check wasm target compiles when switch compilation mode with IC enabled")
     @GradleTest
     fun jsTargetIncrementalMonolithToPerModuleClosedWorld(gradleVersion: GradleVersion) {
@@ -323,7 +321,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
     fun jsTargetWithBinaryenCustomPerFileArgumentPerModuleClosedWorld(gradleVersion: GradleVersion) {
         project("new-mpp-wasm-js", gradleVersion) {
             buildScriptInjection {
-                @OptIn(ExperimentalWasmDsl::class)
                 kotlinMultiplatform.wasmJs {
                     binaries.executable().forEach {
                         it.linkTask.configure {
@@ -366,7 +363,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
                     }
                 }
 
-                @OptIn(ExperimentalWasmDsl::class)
                 it.perFileBinaryenArguments.putAll(perFileArguments)
             }
         }
@@ -417,7 +413,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @DisplayName("Check that wasm-js optimizer is executed if a dependent .wasm file is changed")
     @GradleTest
     fun dependencyChangeTriggersOptimizerWasmJsPerModuleClosedWorld(gradleVersion: GradleVersion) {
@@ -452,7 +447,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @GradleTest
     @DisplayName("Changing lib triggers transitive recompilation through mid to app in per-module closed-world mode")
     fun libChangeTriggersTransitiveRecompileWasmJsPerModuleClosedWorld(gradleVersion: GradleVersion) {
@@ -515,7 +509,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @GradleTest
     @DisplayName("Diamond dependency: lib.wasm appears exactly once despite two dependency paths")
     fun diamondDependencyWasmJsPerModuleClosedWorld(gradleVersion: GradleVersion) {
@@ -562,7 +555,6 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @GradleTest
     @DisplayName("Third-party lib of a dependent module produces a separate .wasm in per-module closed world")
     fun thirdPartyDependencyWasmJsPerModuleClosedWorld(gradleVersion: GradleVersion) {
@@ -598,6 +590,12 @@ class KotlinWasmGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
                 }
             }
         }
+    }
+
+    @DisplayName("Change in a dependency should invalidate up-to-date check")
+    @GradleTest
+    fun testMultiModuleWasmDist(gradleVersion: GradleVersion) {
+        testMultiModuleWasmDistDoTest(gradleVersion, "foo")
     }
 }
 
@@ -648,6 +646,12 @@ class KotlinWasmPerModuleGradlePluginIT : AbstractKotlinWasmGradlePluginIT() {
                     }
             }
         }
+    }
+
+    @DisplayName("Change in a dependency should invalidate up-to-date check")
+    @GradleTest
+    fun testMultiModuleWasmDist(gradleVersion: GradleVersion) {
+        testMultiModuleWasmDistDoTest(gradleVersion, "bar")
     }
 }
 
@@ -852,7 +856,6 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
             }
 
             buildScriptInjection {
-                @OptIn(ExperimentalWasmDsl::class)
                 kotlinMultiplatform.wasmJs {
                     compilerOptions {
                         sourceMap.set(false)
@@ -1183,7 +1186,6 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
         }
     }
 
-    @OptIn(ExperimentalWasmDsl::class)
     @DisplayName("Different binaryen versions per project")
     @GradleTest
     fun testDifferentBinaryenVersions(gradleVersion: GradleVersion) {
@@ -1261,7 +1263,6 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
                 )
             }
 
-            @OptIn(ExperimentalWasmDsl::class)
             buildScriptInjection {
                 kotlinMultiplatform.wasmJs {
                     browser {
@@ -1326,8 +1327,6 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
         project(
             "wasm-composite-build",
             gradleVersion,
-            // `:compileKotlinWasmJs` task is not compatible with CC on Gradle 7
-            buildOptions = defaultBuildOptions.disableConfigurationCacheForGradle7(gradleVersion),
         ) {
             fun BuildResult.moduleVersion(rootModulePath: String, moduleName: String): String =
                 projectPath.resolve(rootModulePath).toFile()
@@ -1396,13 +1395,7 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
     @DisplayName("when project has FAIL_ON_PROJECT_REPOS, expect Kotlin/Wasm tools are downloaded correctly")
     @GradleTest
     fun testFailOnProjectReposUsingCustomRepo(gradleVersion: GradleVersion) {
-        // Gradle versions below 8.1 do not correctly support repository mode
-        val dependencyManagement =
-            if (gradleVersion <= GradleVersion.version("8.1")) {
-                DependencyManagement.DisabledDependencyManagement
-            } else {
-                DependencyManagement.DefaultDependencyManagement()
-            }
+        val dependencyManagement = DependencyManagement.DefaultDependencyManagement()
 
         project(
             "wasm-project-repos",
@@ -1480,13 +1473,7 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
     @DisplayName("when project has FAIL_ON_PROJECT_REPOS without downloading tools, expect KGP does not download tools")
     @GradleTest
     fun testFailOnProjectReposNoDownload(gradleVersion: GradleVersion) {
-        // Gradle versions below 8.1 do not correctly support repository mode
-        val dependencyManagement =
-            if (gradleVersion <= GradleVersion.version("8.1")) {
-                DependencyManagement.DisabledDependencyManagement
-            } else {
-                DependencyManagement.DefaultDependencyManagement()
-            }
+        val dependencyManagement = DependencyManagement.DefaultDependencyManagement()
 
         project(
             "wasm-project-repos",
@@ -1517,6 +1504,132 @@ abstract class AbstractKotlinWasmGradlePluginIT : KGPBaseTest() {
                 assertTasksSkipped(":kotlinWasmYarnSetup")
                 assertTasksSkipped(":kotlinWasmBinaryenSetup")
                 assertTasksSkipped(":kotlinWasmD8Setup")
+            }
+        }
+    }
+
+    @DisplayName("Webpack.config.d content should be in the end of webpack.config.js")
+    @GradleTest
+    fun testWebpackConfigDInTheEnd(gradleVersion: GradleVersion) {
+        val testProject = project("empty", gradleVersion) {
+            plugins {
+                kotlin("multiplatform")
+            }
+
+            buildScriptInjection {
+                project.applyMultiplatform {
+                    wasmJs {
+                        browser()
+                        binaries.executable()
+                    }
+                }
+            }
+        }
+
+        testProject.projectPath.resolve("src/wasmJsMain/kotlin/main.kt")
+            .also {
+                it.parent.createDirectories()
+            }
+            .writeText(
+                """
+                fun main() {
+                    println("Hello, world")
+                }
+                """.trimIndent()
+            )
+
+        val webpackConfigDMarker = "// HELLO FROM WEBPACK.CONFIG.D"
+        testProject.projectPath.resolve("webpack.config.d").createDirectories()
+            .resolve("foo.js")
+            .writeText(webpackConfigDMarker)
+
+        testProject.build("assemble") {
+            assertFileContains(
+                testProject.projectPath.resolve("build/wasm/packages/empty/webpack.config.js"),
+                """
+                    // foo.js
+                    $webpackConfigDMarker
+
+
+                    module.exports = config
+                """.trimIndent()
+            )
+        }
+    }
+
+    @DisplayName("Check css support API")
+    @GradleTest
+    @TestMetadata("kotlin-wasm-js-css-browser-project")
+    fun testWebpackCssSupport(gradleVersion: GradleVersion) {
+        project("kotlin-wasm-js-css-browser-project", gradleVersion) {
+
+            build("wasmJsBrowserProductionWebpack")
+        }
+    }
+
+    @DisplayName("webpack-config-d directory created during the build is not ignored")
+    @GradleTest
+    fun testDynamicWebpackConfigD(gradleVersion: GradleVersion) {
+        project("wasm-js-dynamic-webpack-config-d", gradleVersion) {
+            build("build") {
+                assertDirectoryInProjectExists("build/wasm/packages/wasm-js-dynamic-webpack-config-d")
+                assertFileInProjectContains(
+                    "build/wasm/packages/wasm-js-dynamic-webpack-config-d/webpack.config.js",
+                    "// hello from patch.js"
+                )
+            }
+        }
+    }
+
+    protected fun testMultiModuleWasmDistDoTest(gradleVersion: GradleVersion, subProjectName: String) {
+        project("wasm-browser-several-modules", gradleVersion) {
+            subProject("foo").let {
+                it.projectPath.resolve("src/wasmJsMain/kotlin/A.kt")
+                    .replaceText(
+                        "\"Hello, world\"",
+                        "bar()"
+                    )
+
+                it.buildScriptInjection {
+                    kotlinMultiplatform.sourceSets.getByName("wasmJsMain").dependencies {
+                        implementation(project(":bar"))
+                    }
+                }
+            }
+
+            val compiledWasm =
+                projectPath.resolve("build/wasm/packages/wasm-browser-several-modules-foo/kotlin/wasm-browser-several-modules-$subProjectName.wasm")
+
+            build(":foo:wasmJsBrowserDistribution") {
+                assertTasksExecuted(
+                    ":foo:wasmJsBrowserProductionWebpack",
+                    ":foo:wasmJsBrowserDistribution",
+                )
+                assertFileContains(
+                    compiledWasm,
+                    "Hello from bar"
+                )
+            }
+
+            subProject("bar").projectPath.resolve("src/wasmJsMain/kotlin/A.kt")
+                .replaceText(
+                    "Hello from bar",
+                    "Hello again from bar"
+                )
+
+            build(":foo:wasmJsBrowserDistribution") {
+                assertTasksExecuted(
+                    ":foo:wasmJsBrowserProductionWebpack",
+                    ":foo:wasmJsBrowserDistribution",
+                )
+                assertFileDoesNotContain(
+                    compiledWasm,
+                    "Hello from bar"
+                )
+                assertFileContains(
+                    compiledWasm,
+                    "Hello again from bar"
+                )
             }
         }
     }

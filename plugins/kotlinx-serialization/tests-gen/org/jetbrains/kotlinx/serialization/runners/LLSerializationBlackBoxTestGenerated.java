@@ -163,6 +163,12 @@ public class LLSerializationBlackBoxTestGenerated extends AbstractLLSerializatio
     }
 
     @Test
+    @TestMetadata("externalSerializerWithConcreteSupertype.kt")
+    public void testExternalSerializerWithConcreteSupertype() {
+      run("externalSerializerWithConcreteSupertype.kt");
+    }
+
+    @Test
     @TestMetadata("generatedClassifiersViaLibraryDependency.kt")
     public void testGeneratedClassifiersViaLibraryDependency() {
       run("generatedClassifiersViaLibraryDependency.kt");
@@ -178,6 +184,12 @@ public class LLSerializationBlackBoxTestGenerated extends AbstractLLSerializatio
     @TestMetadata("genericBaseClassSimple.kt")
     public void testGenericBaseClassSimple() {
       run("genericBaseClassSimple.kt");
+    }
+
+    @Test
+    @TestMetadata("genericWithClassUpperBoundMultiModule.kt")
+    public void testGenericWithClassUpperBoundMultiModule() {
+      run("genericWithClassUpperBoundMultiModule.kt");
     }
 
     @Test
@@ -262,6 +274,18 @@ public class LLSerializationBlackBoxTestGenerated extends AbstractLLSerializatio
     @TestMetadata("KeepGeneratedSerializer.kt")
     public void testKeepGeneratedSerializer() {
       run("KeepGeneratedSerializer.kt");
+    }
+
+    @Test
+    @TestMetadata("kt88571.kt")
+    public void testKt88571() {
+      run("kt88571.kt");
+    }
+
+    @Test
+    @TestMetadata("kt88571SerializerFunction.kt")
+    public void testKt88571SerializerFunction() {
+      run("kt88571SerializerFunction.kt");
     }
 
     @Test

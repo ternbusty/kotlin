@@ -1,9 +1,5 @@
 package kotlin
 
-// CHECK_NOT_REFERENCED: Kotlin.isInstanceOf
-// CHECK_NOT_REFERENCED: Kotlin.isTypeOf
-// CHECK_NOT_REFERENCED: Kotlin.orNull
-
 fun success(message: String, fn: ()->Unit) {
     try {
         fn()
@@ -22,4 +18,15 @@ fun failsClassCast(message: String, fn: ()->Unit) {
     }
 
     throw Exception("Expected ClassCastException to be thrown: message=$message")
+}
+
+fun failsNullPointer(message: String, fn: ()->Unit) {
+    try {
+        fn()
+    }
+    catch (e: NullPointerException) {
+        return
+    }
+
+    throw Exception("Expected NullPointerException to be thrown: message=$message")
 }

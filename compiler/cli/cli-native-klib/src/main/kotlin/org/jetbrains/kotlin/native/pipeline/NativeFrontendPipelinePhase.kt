@@ -14,8 +14,8 @@ import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.cli.jvm.compiler.toVfsBasedProjectEnvironment
 import org.jetbrains.kotlin.cli.pipeline.*
 import org.jetbrains.kotlin.compiler.plugin.getCompilerExtensions
-import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.config.parserMode
 import org.jetbrains.kotlin.config.perfManager
 import org.jetbrains.kotlin.diagnostics.impl.BaseDiagnosticsCollector
 import org.jetbrains.kotlin.fir.*
@@ -71,7 +71,7 @@ object NativeFrontendPipelinePhase : PipelinePhase<ConfigurationPipelineArtifact
             val [interopLibs, regularLibs] = config.loadedKlibs.all.partition { it.isCInteropLibrary() }
             defaultDependenciesSet(mainModuleName) {
                 dependencies(regularLibs.map { it.path.absolutePathString() })
-                friendDependencies(config.friendModuleFiles.map { it.absolutePathString() })
+                friendDependencies(config.loadedKlibs.friends.map { it.path.absolutePathString() })
                 dependsOnDependencies(config.refinesModuleFiles.map { it.absolutePathString() })
             }
             if (interopLibs.isNotEmpty()) {
@@ -164,7 +164,7 @@ object NativeFrontendPipelinePhase : PipelinePhase<ConfigurationPipelineArtifact
         input: KotlinCoreEnvironment,
         configuration: CompilerConfiguration
     ): AllModulesFrontendOutput {
-        var output = if (configuration.getBoolean(CommonConfigurationKeys.USE_LIGHT_TREE)) {
+        var output = if (configuration.parserMode.treeBased) {
             firFrontendWithLightTree(input, configuration)
         } else {
             firFrontendWithPsi(input, configuration)

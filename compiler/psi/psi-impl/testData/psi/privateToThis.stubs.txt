@@ -2,7 +2,7 @@ FILE[kind=File[packageFqName=p]]
   PACKAGE_DIRECTIVE
     REFERENCE_EXPRESSION[referencedName=p]
   IMPORT_LIST
-  CLASS[classId=p/PrivateToThis, fqName=p.PrivateToThis, isClsStubCompiledToJvmDefaultImplementation=false, isInterface=false, isLocal=false, isTopLevel=true, name=PrivateToThis, superNames=[]]
+  CLASS[classId=p/PrivateToThis, fqName=p.PrivateToThis, isClsStubCompiledToJvmDefaultImplementation=false, isInterface=false, isTopLevel=true, name=PrivateToThis, superNames=[]]
     TYPE_PARAMETER_LIST
       TYPE_PARAMETER[fqName=null, name=I]
         MODIFIER_LIST[in]
@@ -49,7 +49,7 @@ FILE[kind=File[packageFqName=p]]
               TYPE_REFERENCE
                 USER_TYPE
                   REFERENCE_EXPRESSION[referencedName=I]
-      FUN[fqName=p.PrivateToThis.bas, hasBody=true, hasNoExpressionBody=false, hasTypeParameterListBeforeFunctionName=false, isExtension=false, isTopLevel=false, mayHaveContract=false, name=bas]
+      FUNCTION[fqName=p.PrivateToThis.bas, hasBody=true, hasNoExpressionBody=false, hasTypeParameterListBeforeFunctionName=false, isExtension=false, isTopLevel=false, mayHaveContract=false, name=bas]
         MODIFIER_LIST[private]
         VALUE_PARAMETER_LIST
         TYPE_REFERENCE

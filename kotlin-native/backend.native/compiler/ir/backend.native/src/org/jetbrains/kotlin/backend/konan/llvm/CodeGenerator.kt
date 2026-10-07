@@ -6,20 +6,28 @@
 package org.jetbrains.kotlin.backend.konan.llvm
 
 
-import kotlinx.cinterop.*
+import kotlinx.cinterop.cValuesOf
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.toCValues
 import llvm.*
+import org.jetbrains.kotlin.backend.common.lower.enumEntriesMap
 import org.jetbrains.kotlin.backend.konan.NativeGenerationState
+import org.jetbrains.kotlin.backend.konan.NativeSecondStageCompilationConfig
 import org.jetbrains.kotlin.backend.konan.RuntimeNames
 import org.jetbrains.kotlin.backend.konan.binaryTypeIsReference
 import org.jetbrains.kotlin.backend.konan.cgen.CBridgeOrigin
 import org.jetbrains.kotlin.backend.konan.ir.ClassGlobalHierarchyInfo
+import org.jetbrains.kotlin.backend.konan.ir.OverriddenFunctionInfo
 import org.jetbrains.kotlin.backend.konan.ir.isAbstract
+import org.jetbrains.kotlin.backend.konan.isCache
 import org.jetbrains.kotlin.backend.konan.llvm.ThreadState.Native
 import org.jetbrains.kotlin.backend.konan.llvm.ThreadState.Runnable
 import org.jetbrains.kotlin.backend.konan.llvm.objc.ObjCDataGenerator
 import org.jetbrains.kotlin.backend.konan.lower.bridgeTarget
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
-import org.jetbrains.kotlin.ir.declarations.*
+import org.jetbrains.kotlin.ir.declarations.IrClass
+import org.jetbrains.kotlin.ir.declarations.IrEnumEntry
+import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.objcinterop.*
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.konan.ForeignExceptionMode
@@ -303,6 +311,10 @@ internal object VirtualTablesLookup {
 internal val IrSimpleFunction.needsVirtualTrampoline: Boolean
     get() = isOverridable && bridgeTarget == null
 
+context(config: NativeSecondStageCompilationConfig)
+internal val IrSimpleFunction.needsCacheEntryPointForFinalFakeOverride: Boolean
+    get() = config.produce.isCache && isFakeOverride && !isOverridable && isExported
+
 /*
  * Special trampoline function that performs the vtable/itable lookup and dispatches to the actual virtual
  * implementation (which lives at `<name>-impl`). The trampoline occupies the public symbol name,
@@ -357,8 +369,16 @@ private fun CodeGenerator.getVirtualFunctionTrampolineImpl(irFunction: IrSimpleF
                 }
                 generateFunction(this, proto, needSafePoint = false, startLocation = location, endLocation = location) {
                     val args = proto.signature.parameterTypes.indices.map { param(it) }
-                    val receiver = param(0)
-                    val callee = with(VirtualTablesLookup) { getVirtualImpl(receiver, irFunction) }
+                    val callee = if (irFunction.isOverridable) {
+                        val receiver = param(0)
+                        with(VirtualTablesLookup) { getVirtualImpl(receiver, irFunction) }
+                    } else {
+                        // KT-87777: reference the inherited implementation directly, without relying on virtual lookups.
+                        val implementation = OverriddenFunctionInfo(irFunction, irFunction, context.config.bridgesPolicy)
+                                .getImplementation(context)
+                                ?: error("No implementation for the final fake override ${irFunction.render()}")
+                        codegen.getLlvmFunctionFrom(implementation)
+                    }
                     val result = call(callee, args, exceptionHandler = ExceptionHandler.Caller, verbatim = true)
                     ret(result)
                 }.also { llvmFunction ->
@@ -1262,7 +1282,7 @@ internal abstract class FunctionGenerationContext(
      */
     fun getEnumEntry(enumEntry: IrEnumEntry, exceptionHandler: ExceptionHandler): LLVMValueRef {
         val enumClass = enumEntry.parentAsClass
-        val getterId = context.enumsSupport.enumEntriesMap(enumClass)[enumEntry.name]!!.getterId
+        val getterId = enumEntriesMap(enumClass)[enumEntry.name]!!.getterId
         return call(
                 context.enumsSupport.getValueGetter(enumClass).llvmFunction,
                 listOf(llvm.int32(getterId)),

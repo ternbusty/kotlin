@@ -6,11 +6,13 @@
 package org.jetbrains.kotlin.backend.konan.lower
 
 import org.jetbrains.kotlin.backend.common.FileLoweringPass
+import org.jetbrains.kotlin.backend.common.lower.ExpressionBodyTransformer
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
+import org.jetbrains.kotlin.backend.common.phaser.PhasePrerequisites
+import org.jetbrains.kotlin.backend.common.serialization.kotlinLibrary
 import org.jetbrains.kotlin.backend.konan.*
 import org.jetbrains.kotlin.backend.konan.binaryTypeIsReference
 import org.jetbrains.kotlin.backend.konan.ir.getSuperClassNotAny
-import org.jetbrains.kotlin.backend.konan.ir.konanLibrary
 import org.jetbrains.kotlin.backend.konan.llvm.FieldStorageKind
 import org.jetbrains.kotlin.backend.konan.llvm.storageKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
@@ -25,6 +27,7 @@ import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.irAttribute
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
+import org.jetbrains.kotlin.ir.symbols.IrFieldSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.types.classOrFail
 import org.jetbrains.kotlin.ir.util.*
@@ -35,6 +38,7 @@ import org.jetbrains.kotlin.library.newCompanionInitializationEnabled
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.utils.addToStdlib.getOrSetIfNull
 import org.jetbrains.kotlin.utils.addToStdlib.runIf
+import org.jetbrains.kotlin.utils.addToStdlib.takeIfNotEmpty
 
 internal object StaticInitializersOrigins {
     internal val STATIC_GLOBAL_INITIALIZER by IrDeclarationOriginImpl.Synthetic
@@ -71,7 +75,20 @@ internal fun ConfigChecks.shouldBeInitializedEagerly(irField: IrField): Boolean 
 
 internal var IrClass.clinitTriggerFunction: IrSimpleFunctionSymbol? by irAttribute(copyByDefault = false)
 
-internal class StaticInitializersLowering(val context: NativeBackendContext) : FileLoweringPass {
+/**
+ * A list of static object fields, that become available after the initializer function runs.
+ *
+ * Only present on functions with origins from [StaticInitializersOrigins]. But maybe absent from those, if the list is empty.
+ *
+ * **NOTE**: Static primitive fields are currently absent from this list to keep the list smaller and to avoid generating
+ *           some initializers; primitive fields do not need to be specially registered before accessing them, so it's okay.
+ *
+ * The contract: [IrFieldSymbol] from this attribute must not be accessed in the whole program in any way before the function starts executing.
+ */
+internal var IrSimpleFunction.initializedGlobals: List<IrFieldSymbol>? by irAttribute(copyByDefault = false)
+
+@PhasePrerequisites(ExpressionBodyTransformer::class)
+internal class StaticInitializersLowering(val context: NativeLoweringContext) : FileLoweringPass {
     override fun lower(irFile: IrFile) {
         irFile.acceptVoid(object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
@@ -119,14 +136,18 @@ internal class StaticInitializersLowering(val context: NativeBackendContext) : F
     }
 
     fun processDeclarationContainter(container: IrDeclarationContainer) {
-        val threadLocalInitializers = mutableListOf<IrExpression>()
-        val globalInitializers = mutableListOf<IrExpression>()
-        val eagerThreadLocalInitializers = mutableListOf<IrExpression>()
-        val eagerGlobalInitializers = mutableListOf<IrExpression>()
+        // Each list is a pair of an optional `IrField` and an optional `IrExpression`. `null to null` is invalid, other combinations:
+        // * `field to expr`: initializing a `field` with an `expr`
+        // * `field to null`: the `field` does not have an initializer, but it belongs to the current scope (skipped for primitive fields as an optimization)
+        // * `null to expr`: calling another static initializer (e.g. `companion` calling `super.companion`)
+        val threadLocalInitializers = mutableListOf<Pair<IrField?, IrExpression?>>()
+        val globalInitializers = mutableListOf<Pair<IrField?, IrExpression?>>()
+        val eagerThreadLocalInitializers = mutableListOf<Pair<IrField?, IrExpression?>>()
+        val eagerGlobalInitializers = mutableListOf<Pair<IrField?, IrExpression?>>()
 
         val builder = context.irBuiltIns.createIrBuilder((container as IrSymbolOwner).symbol, SYNTHETIC_OFFSET, SYNTHETIC_OFFSET)
 
-        if (container is IrClass && !container.isInterface && container.konanLibrary?.newCompanionInitializationEnabled == true) {
+        if (container is IrClass && !container.isInterface && container.moduleFragment.kotlinLibrary?.newCompanionInitializationEnabled == true) {
             // Implemented as defined in
             // https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-5.html#jvms-5.5
             // Next, if C is a class rather than an interface, then let SC be its superclass and let SI1, ..., SIn be all
@@ -167,8 +188,8 @@ internal class StaticInitializersLowering(val context: NativeBackendContext) : F
             }
             for (superClass in superClassesToInitialize) {
                 val trigger = superClass.getClinitTriggerFunction()
-                globalInitializers.add(builder.irCall(trigger))
-                threadLocalInitializers.add(builder.irCall(trigger))
+                globalInitializers.add(null to builder.irCall(trigger))
+                threadLocalInitializers.add(null to builder.irCall(trigger))
             }
         }
 
@@ -195,10 +216,10 @@ internal class StaticInitializersLowering(val context: NativeBackendContext) : F
                     continue
                 }
             }
-            val realInitializer = when {
-                initializer != null -> initializer
-                irField.type.binaryTypeIsReference() -> builder.irNull() // we need to initialize with something to register with GC
-                else -> continue
+            // Optimization: if a field is a primitive and doesn't have an initializer, we won't need to register it.
+            // This might help skipping generation of some static initializers, thus generating less work for the following stages.
+            if (initializer == null && !irField.type.binaryTypeIsReference()) {
+                continue
             }
             val isEager = context.shouldBeInitializedEagerly(irField)
             val initializers = when (isThreadLocal) {
@@ -207,12 +228,15 @@ internal class StaticInitializersLowering(val context: NativeBackendContext) : F
                 false -> globalInitializers
                 true -> threadLocalInitializers
             }
-            initializers.add(builder.irSetField(
-                    receiver = null,
-                    field = irField,
-                    value = realInitializer,
-                    origin = if (isThreadLocal) StaticInitializersOrigins.INITIALIZE_THREAD_LOCAL_FIELD else StaticInitializersOrigins.INITIALIZE_GLOBAL_FIELD
-            ))
+            val expr = initializer?.let {
+                builder.irSetField(
+                        receiver = null,
+                        field = irField,
+                        value = it,
+                        origin = if (isThreadLocal) StaticInitializersOrigins.INITIALIZE_THREAD_LOCAL_FIELD else StaticInitializersOrigins.INITIALIZE_GLOBAL_FIELD
+                )
+            }
+            initializers.add(irField to expr)
             irField.initializer = null
         }
 
@@ -284,7 +308,7 @@ internal class StaticInitializersLowering(val context: NativeBackendContext) : F
             container: IrDeclarationContainer,
             name: String,
             origin: IrDeclarationOrigin,
-            initializers: List<IrExpression>
+            initializers: List<Pair<IrField?, IrExpression?>>
     ) = context.irFactory.buildFun {
         startOffset = SYNTHETIC_OFFSET
         endOffset = SYNTHETIC_OFFSET
@@ -299,9 +323,16 @@ internal class StaticInitializersLowering(val context: NativeBackendContext) : F
         returnType = context.irBuiltIns.unitType
     }.apply {
         parent = container
-        body = context.irFactory.createBlockBody(startOffset, endOffset, initializers)
+        // Even if the statements below is empty, we want to create the empty body; during code generation, we might want
+        // to add something to this body (e.g. by reading from initializedGlobals)
+        body = context.irFactory.createBlockBody(startOffset, endOffset, initializers.mapNotNull { it.second })
                 .setDeclarationsParent(this)
         container.declarations.add(0, this)
+        initializedGlobals = initializers
+                .mapNotNull { it.first }
+                .filter { it.type.binaryTypeIsReference() }
+                .map { it.symbol }
+                .takeIfNotEmpty()
     }
 
 }

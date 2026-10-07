@@ -57,6 +57,20 @@ public class ContextCollectorScriptTestGenerated extends AbstractContextCollecto
   }
 
   @Nested
+  @TestMetadata("analysis/low-level-api-fir/testData/contextCollector/classMembers")
+  @TestDataPath("$PROJECT_ROOT")
+  public class ClassMembers {
+    private void run(String fileName) {
+      runTest("analysis/low-level-api-fir/testData/contextCollector/classMembers/" + fileName);
+    }
+
+    @Test
+    public void testAllFilesPresentInClassMembers() {
+      KtTestUtil.assertAllTestsPresentByMetadataWithExcluded(this.getClass(), new File("analysis/low-level-api-fir/testData/contextCollector/classMembers"), Pattern.compile("^(.+)\\.(kts)$"), null, true);
+    }
+  }
+
+  @Nested
   @TestMetadata("analysis/low-level-api-fir/testData/contextCollector/codeFragments")
   @TestDataPath("$PROJECT_ROOT")
   public class CodeFragments {
@@ -123,6 +137,62 @@ public class ContextCollectorScriptTestGenerated extends AbstractContextCollecto
     @Test
     public void testAllFilesPresentInExpressionStability() {
       KtTestUtil.assertAllTestsPresentByMetadataWithExcluded(this.getClass(), new File("analysis/low-level-api-fir/testData/contextCollector/expressionStability"), Pattern.compile("^(.+)\\.(kts)$"), null, true);
+    }
+  }
+
+  @Nested
+  @TestMetadata("analysis/low-level-api-fir/testData/contextCollector/fileMembers")
+  @TestDataPath("$PROJECT_ROOT")
+  public class FileMembers {
+    private void run(String fileName) {
+      runTest("analysis/low-level-api-fir/testData/contextCollector/fileMembers/" + fileName);
+    }
+
+    @Test
+    public void testAllFilesPresentInFileMembers() {
+      KtTestUtil.assertAllTestsPresentByMetadataWithExcluded(this.getClass(), new File("analysis/low-level-api-fir/testData/contextCollector/fileMembers"), Pattern.compile("^(.+)\\.(kts)$"), null, true);
+    }
+
+    @Test
+    @TestMetadata("replAnnotationArgument.repl.kts")
+    public void testReplAnnotationArgument_repl() {
+      run("replAnnotationArgument.repl.kts");
+    }
+
+    @Test
+    @TestMetadata("replDeclaration.repl.kts")
+    public void testReplDeclaration_repl() {
+      run("replDeclaration.repl.kts");
+    }
+
+    @Test
+    @TestMetadata("replStatement.repl.kts")
+    public void testReplStatement_repl() {
+      run("replStatement.repl.kts");
+    }
+
+    @Test
+    @TestMetadata("scriptAnnotationArgument.kts")
+    public void testScriptAnnotationArgument() {
+      run("scriptAnnotationArgument.kts");
+    }
+
+    @Test
+    @TestMetadata("scriptDanglingModifierList.kts")
+    public void testScriptDanglingModifierList() {
+      run("scriptDanglingModifierList.kts");
+    }
+
+    @Test
+    @TestMetadata("scriptDeclaration.kts")
+    public void testScriptDeclaration() {
+      run("scriptDeclaration.kts");
+    }
+
+    @Test
+    @TestMetadata("scriptStatement.kts")
+    public void testScriptStatement() {
+      run("scriptStatement.kts");
     }
   }
 
@@ -211,6 +281,12 @@ public class ContextCollectorScriptTestGenerated extends AbstractContextCollecto
     @TestMetadata("defaultImports.test.kts")
     public void testDefaultImports_test() {
       run("defaultImports.test.kts");
+    }
+
+    @Test
+    @TestMetadata("explicitBackingField.kts")
+    public void testExplicitBackingField() {
+      run("explicitBackingField.kts");
     }
 
     @Test

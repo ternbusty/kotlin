@@ -1,20 +1,27 @@
-import org.jetbrains.kotlin.testFederation.SmokeTestConfig
-import org.jetbrains.kotlin.testFederation.smokeTestConfig
+import org.jetbrains.kotlin.testFederation.testFederation
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("jvm")
     kotlin("plugin.serialization")
-    id("project-tests-convention")
 }
 
-val jdkVersion = JdkMajorVersion.JDK_17_0
-configureJvmToolchain(jdkVersion)
+val jdkVersionToUse = JdkMajorVersion.JDK_17_0
+jvmToolchains {
+    jdkVersion = jdkVersionToUse
+    targetBytecodeVersion = jdkVersionToUse
+}
 
 dependencies {
-    implementation(kotlinStdlib())
+    // The `reviewCode` task is used on TeamCity and might also be used locally in cold build scenarios
+    // (i.e. the reviewer switches to the branch and runs the task).
+    // So, it is important to make the cold build fast. Use the bootstrap stdlib instead of
+    // the snapshot one (`:kotlin-stdlib`), so that running the task doesn't require building the stdlib:
+    implementation(kotlin("stdlib"))
+    // Note: this won't help if there are other dependencies transitively depending on the snapshot stdlib.
+    // Keep this in mind when adding the dependencies below.
+
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.core.jvm)
     implementation(libs.kotlinx.serialization.json)
@@ -34,13 +41,20 @@ sourceSets {
 }
 
 abstract class CodeReviewTask : JavaExec() {
-    @set:Option(
-        "base",
-        "The base git revision to compare the sources against. For example, origin/master (default) or HEAD~2"
+    @get:Option(
+        option = "base",
+        description = "The base git revision to compare the sources against. For example, origin/master (default) or HEAD~2"
     )
     @get:Input
     @get:Optional
-    var base: String? = null
+    abstract val base: Property<String>
+
+    @get:Option(
+        option = "output",
+        description = "The path to the output Markdown file"
+    )
+    @get:OutputFile
+    abstract val output: RegularFileProperty
 }
 
 tasks.register<CodeReviewTask>("reviewCode") {
@@ -48,29 +62,43 @@ tasks.register<CodeReviewTask>("reviewCode") {
 
     classpath(sourceSets.named("main").flatMap { it.kotlin.classesDirectory })
     classpath(sourceSets.named("main").map { it.compileClasspath })
-    mainClass.set("org.jetbrains.kotlin.code.review.LocalKt")
 
-    val output = layout.buildDirectory.file("review.md")
+    mainClass = kotlinBuildProperties.isTeamcityBuild.map {
+        if (it) {
+            "org.jetbrains.kotlin.code.review.TeamcityKt"
+        } else {
+            "org.jetbrains.kotlin.code.review.LocalKt"
+        }
+    }
+
+    output.convention(layout.buildDirectory.file("review.md"))
     val rootDir = rootDir
 
-    outputs.file(output)
     outputs.upToDateWhen { false }
 
     argumentProviders.add {
         listOf(
-            output.get().asFile.path,
+            output.get().asFile.absolutePath,
             rootDir.absolutePath
-        ) + listOfNotNull(base)
+        ) + listOfNotNull(base.getOrNull())
+    }
+
+    val jetbrainsCentralProperty = "kotlin.autoCodeReview.useJetBrainsCentralCLI"
+    val jetbrainsCentralBinary = kotlinBuildProperties.stringProperty(jetbrainsCentralProperty)
+    jvmArgumentProviders.add {
+        listOfNotNull(jetbrainsCentralBinary.orNull?.let { "-D$jetbrainsCentralProperty=$it" })
     }
 }
 
 projectTests {
-    testTask(javaLauncher = jdkVersion) {
+    testTask(javaLauncher = jdkVersionToUse) {
         systemProperty("kotlin.repo.auto-code-review.rootDir", rootDir.absolutePath)
 
         // One of the tests traverses all files in the repo. And the tests are fairly quick.
         // It is therefore reasonable to make it always rerun instead of defining its inputs:
-        smokeTestConfig = SmokeTestConfig.RunAllTests
+        testFederation {
+            smokeTests { includeAll() }
+        }
         outputs.upToDateWhen { false }
     }
 }

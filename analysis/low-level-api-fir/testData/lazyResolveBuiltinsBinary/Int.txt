@@ -1943,17 +1943,17 @@ TARGET: public final [ResolvedTo(BODY_RESOLVE)] class Int : R|kotlin/Number|, R|
 
     @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun div([ResolvedTo(STATUS)] other: R|kotlin/Double|): R|kotlin/Double| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Byte|): R|kotlin/Int| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) [compilerRequired = (version = String(1.1))] @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Byte|): R|kotlin/Int| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Short|): R|kotlin/Int| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) [compilerRequired = (version = String(1.1))] @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Short|): R|kotlin/Int| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Int|): R|kotlin/Int| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) [compilerRequired = (version = String(1.1))] @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Int|): R|kotlin/Int| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Long|): R|kotlin/Long| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) [compilerRequired = (version = String(1.1))] @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Long|): R|kotlin/Long| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Float|): R|kotlin/Float| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) [compilerRequired = (version = String(1.1))] @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Float|): R|kotlin/Float| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Double|): R|kotlin/Double| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.1)) [compilerRequired = (version = String(1.1))] @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final operator [ResolvedTo(STATUS)] fun rem([ResolvedTo(STATUS)] other: R|kotlin/Double|): R|kotlin/Double| { LAZY_BLOCK }
 
     public final operator [ResolvedTo(STATUS)] fun inc(): R|kotlin/Int| { LAZY_BLOCK }
 
@@ -1971,13 +1971,13 @@ TARGET: public final [ResolvedTo(BODY_RESOLVE)] class Int : R|kotlin/Number|, R|
 
     public final operator [ResolvedTo(STATUS)] fun rangeTo([ResolvedTo(STATUS)] other: R|kotlin/Long|): R|kotlin/ranges/LongRange| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Byte|): R|kotlin/ranges/IntRange| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) [compilerRequired = (version = String(1.9))] @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Byte|): R|kotlin/ranges/IntRange| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Short|): R|kotlin/ranges/IntRange| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) [compilerRequired = (version = String(1.9))] @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Short|): R|kotlin/ranges/IntRange| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Int|): R|kotlin/ranges/IntRange| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) [compilerRequired = (version = String(1.9))] @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Int|): R|kotlin/ranges/IntRange| { LAZY_BLOCK }
 
-    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Long|): R|kotlin/ranges/LongRange| { LAZY_BLOCK }
+    @R|kotlin/SinceKotlin|[Types](version = String(1.9)) [compilerRequired = (version = String(1.9))] @R|kotlin/WasExperimental|[Types](markerClass = <collectionLiteralCall>(<getClass>(kotlin#.ExperimentalStdlibApi#))) public final operator [ResolvedTo(STATUS)] fun rangeUntil([ResolvedTo(STATUS)] other: R|kotlin/Long|): R|kotlin/ranges/LongRange| { LAZY_BLOCK }
 
     @R|kotlin/internal/IntrinsicConstEvaluation|[Types]() public final infix [ResolvedTo(STATUS)] fun shl([ResolvedTo(STATUS)] bitCount: R|kotlin/Int|): R|kotlin/Int| { LAZY_BLOCK }
 
@@ -2541,7 +2541,7 @@ FILE: [ResolvedTo(BODY_RESOLVE)] kotlin.kotlin_builtins
         }
 
         public final static [ResolvedTo(BODY_RESOLVE)] [ContainingClassKey=DeprecationLevel, HasBackingFieldKey=false] val entries: R|kotlin/enums/EnumEntries<kotlin/DeprecationLevel>|
-            public static [ResolvedTo(BODY_RESOLVE)] get(): R|kotlin/enums/EnumEntries<kotlin/DeprecationLevel>|
+            public static [ResolvedTo(BODY_RESOLVE)] [ContainingClassKey=DeprecationLevel] get(): R|kotlin/enums/EnumEntries<kotlin/DeprecationLevel>|
 
     }
     public final [ResolvedTo(BODY_RESOLVE)] class Double : R|kotlin/Number|, R|kotlin/Comparable<kotlin/Double>| {
@@ -2794,6 +2794,12 @@ FILE: [ResolvedTo(BODY_RESOLVE)] kotlin.kotlin_builtins
 
         public final [ResolvedTo(BODY_RESOLVE)] [IsFromPrimaryConstructor=true] val bound: R|kotlin/reflect/KClass<*>| = R|<local>/bound|
             public [ResolvedTo(BODY_RESOLVE)] [ContainingClassKey=EqualityBound] get(): R|kotlin/reflect/KClass<*>|
+
+    }
+    @R|kotlin/RequiresOptIn|[Types](level = Q|kotlin/RequiresOptIn.Level|.R|kotlin/RequiresOptIn.Level.ERROR| [evaluated = Q|kotlin/RequiresOptIn.Level|.R|kotlin/RequiresOptIn.Level.ERROR|]) @R|kotlin/annotation/Retention|[Types](value = Q|kotlin/annotation/AnnotationRetention|.R|kotlin/annotation/AnnotationRetention.BINARY| [evaluated = Q|kotlin/annotation/AnnotationRetention|.R|kotlin/annotation/AnnotationRetention.BINARY|]) @R|kotlin/annotation/Target|[Types](allowedTargets = vararg(*<collectionLiteralCall>(Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.ANNOTATION_CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FIELD|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.LOCAL_VARIABLE|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.VALUE_PARAMETER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CONSTRUCTOR|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FUNCTION|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_GETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_SETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.TYPEALIAS|)) [evaluated = vararg(Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.ANNOTATION_CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FIELD|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.LOCAL_VARIABLE|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.VALUE_PARAMETER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CONSTRUCTOR|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FUNCTION|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_GETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_SETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.TYPEALIAS|)]) @R|kotlin/annotation/MustBeDocumented|[Types]() @R|kotlin/SinceKotlin|[Types](version = String(2.5) [evaluated = String(2.5)]) public final [ResolvedTo(BODY_RESOLVE)] annotation class ExperimentalCollectionLiteralsApi : R|kotlin/Annotation|, R|kotlin/Annotation| {
+        public [ResolvedTo(BODY_RESOLVE)] [ContainingClassKey=ExperimentalCollectionLiteralsApi] constructor(): R|kotlin/ExperimentalCollectionLiteralsApi| {
+            super<R|kotlin/Any|>()
+        }
 
     }
     @R|kotlin/RequiresOptIn|[Types](level = Q|kotlin/RequiresOptIn.Level|.R|kotlin/RequiresOptIn.Level.ERROR| [evaluated = Q|kotlin/RequiresOptIn.Level|.R|kotlin/RequiresOptIn.Level.ERROR|]) @R|kotlin/annotation/Retention|[Types](value = Q|kotlin/annotation/AnnotationRetention|.R|kotlin/annotation/AnnotationRetention.BINARY| [evaluated = Q|kotlin/annotation/AnnotationRetention|.R|kotlin/annotation/AnnotationRetention.BINARY|]) @R|kotlin/annotation/Target|[Types](allowedTargets = vararg(*<collectionLiteralCall>(Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.ANNOTATION_CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FIELD|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.LOCAL_VARIABLE|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.VALUE_PARAMETER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CONSTRUCTOR|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FUNCTION|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_GETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_SETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.TYPEALIAS|)) [evaluated = vararg(Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.ANNOTATION_CLASS|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FIELD|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.LOCAL_VARIABLE|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.VALUE_PARAMETER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.CONSTRUCTOR|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.FUNCTION|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_GETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.PROPERTY_SETTER|, Q|kotlin/annotation/AnnotationTarget|.R|kotlin/annotation/AnnotationTarget.TYPEALIAS|)]) @R|kotlin/annotation/MustBeDocumented|[Types]() @R|kotlin/SinceKotlin|[Types](version = String(1.3) [evaluated = String(1.3)]) public final [ResolvedTo(BODY_RESOLVE)] annotation class ExperimentalStdlibApi : R|kotlin/Annotation|, R|kotlin/Annotation| {
@@ -3601,7 +3607,7 @@ See https://youtrack.jetbrains.com/issue/KT-46465 for details about the migratio
             }
 
             public final static [ResolvedTo(BODY_RESOLVE)] [ContainingClassKey=Level, HasBackingFieldKey=false] val entries: R|kotlin/enums/EnumEntries<kotlin/RequiresOptIn.Level>|
-                public static [ResolvedTo(BODY_RESOLVE)] get(): R|kotlin/enums/EnumEntries<kotlin/RequiresOptIn.Level>|
+                public static [ResolvedTo(BODY_RESOLVE)] [ContainingClassKey=Level] get(): R|kotlin/enums/EnumEntries<kotlin/RequiresOptIn.Level>|
 
         }
 

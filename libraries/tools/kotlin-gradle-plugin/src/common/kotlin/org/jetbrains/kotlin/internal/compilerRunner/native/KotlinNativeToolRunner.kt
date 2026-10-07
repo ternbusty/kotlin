@@ -23,7 +23,6 @@ import org.jetbrains.kotlin.gradle.internal.ParentClassLoaderProvider
 import org.jetbrains.kotlin.gradle.logging.GradleErrorMessageCollector
 import org.jetbrains.kotlin.gradle.logging.gradleLogLevel
 import org.jetbrains.kotlin.gradle.plugin.statistics.BuildFusService
-import org.jetbrains.kotlin.gradle.plugin.statistics.NativeArgumentMetrics
 import org.jetbrains.kotlin.gradle.utils.escapeStringCharacters
 import org.jetbrains.kotlin.konan.target.HostManager
 import org.jetbrains.kotlin.statistics.FusMetricRetrievalException
@@ -59,9 +58,6 @@ internal abstract class KotlinNativeToolRunner @Inject constructor(
 
     fun runTool(args: ToolArguments) {
         metricsReporter.measure(RUN_COMPILATION_IN_WORKER) {
-            fusMetricsConsumer.orNull?.let { metricsConsumer ->
-                NativeArgumentMetrics.collectMetrics(args.arguments, metricsConsumer.getFusMetricsConsumer())
-            }
             if (args.shouldRunInProcessMode) {
                 runInProcess(args)
             } else {
@@ -323,6 +319,7 @@ private fun PhaseType.toGradleBuildTime() = when (this) {
     PhaseType.IrPreLowering -> IR_PRE_LOWERING
     PhaseType.IrSerialization -> IR_SERIALIZATION
     PhaseType.KlibWriting -> KLIB_WRITING
+    PhaseType.KlibMetadataWriting -> KLIB_METADATA_WRITING
     PhaseType.IrLinking -> IR_LINKING
     PhaseType.IrLowering -> IR_LOWERING
     PhaseType.Backend -> BACKEND

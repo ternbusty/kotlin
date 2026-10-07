@@ -20,10 +20,17 @@ import com.intellij.psi.search.LocalSearchScope
  *        break@outer
  *    }
  * // ^_____________________^
- * // The entire `for` block from `outer@' to '}'
+ * // The entire `for` block from `outer@` to `}`
  * ```
  */
-class KtLabeledExpression(node: ASTNode) : KtExpressionWithLabel(node), PsiNameIdentifierOwner {
+@OptIn(KtImplementationDetail::class)
+class KtLabeledExpression : KtExpressionWithLabel, PsiNameIdentifierOwner {
+    @KtImplementationDetail
+    constructor(node: ASTNode) : super(node)
+
+    /**
+     * The expression the label is attached to (the part after `label@`), or `null` if it is absent in incomplete code.
+     */
     @get:IfNotParsed
     val baseExpression: KtExpression?
         get() = findChildByClass(KtExpression::class.java)
@@ -32,8 +39,12 @@ class KtLabeledExpression(node: ASTNode) : KtExpressionWithLabel(node), PsiNameI
 
     override fun getName() = getLabelName()
 
-    @OptIn(KtNonPublicApi::class)
-    override fun setName(name: String): PsiElement = KtPsiMutationService.getInstance().setLabeledExpressionName(this, name)
+    @OptIn(KtIdeApi::class)
+    override fun setName(name: String): PsiElement {
+        KtPsiMutationService.getInstanceOrNull()?.let { return it.setLabeledExpressionName(this, name) }
+        getTargetLabel()?.replace(KtPsiFactory(project).createLabeledExpression(name).getTargetLabel()!!)
+        return this
+    }
 
     override fun getNameIdentifier() = getTargetLabel()?.getIdentifier()
 

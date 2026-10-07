@@ -14,6 +14,7 @@ import org.jetbrains.kotlin.test.Constructor
 import org.jetbrains.kotlin.test.TargetBackend
 import org.jetbrains.kotlin.test.backend.BlackBoxCodegenSuppressor
 import org.jetbrains.kotlin.test.backend.handlers.KlibBackendDiagnosticsHandler
+import org.jetbrains.kotlin.test.backend.ir.IrDiagnosticsHandler
 import org.jetbrains.kotlin.test.builders.*
 import org.jetbrains.kotlin.test.configuration.commonCodegenConfiguration
 import org.jetbrains.kotlin.test.configuration.commonIrHandlersForCodegenTest
@@ -25,7 +26,6 @@ import org.jetbrains.kotlin.test.frontend.fir.handlers.*
 import org.jetbrains.kotlin.test.model.*
 import org.jetbrains.kotlin.test.runners.AbstractKotlinCompilerWasmTest
 import org.jetbrains.kotlin.test.services.AdditionalSourceProvider
-import org.jetbrains.kotlin.test.services.LibraryProvider
 import org.jetbrains.kotlin.test.services.configuration.CommonEnvironmentConfigurator
 import org.jetbrains.kotlin.test.services.configuration.WasmFirstStageEnvironmentConfigurator
 import org.jetbrains.kotlin.test.services.configuration.WasmSecondStageEnvironmentConfigurator
@@ -139,8 +139,6 @@ fun <R : ResultingArtifact.FrontendOutput<R>, I : ResultingArtifact.BackendInput
     @OptIn(org.jetbrains.kotlin.test.TestInfrastructureInternals::class)
     useModuleStructureTransformers(WasmCoroutineHelpersModuleTransformer)
 
-    useAdditionalService(::LibraryProvider)
-
     useFailureSuppressors(
         ::BlackBoxCodegenSuppressor.bind(customIgnoreDirective, additionalIgnoreDirectives),
     )
@@ -177,6 +175,7 @@ fun TestConfigurationBuilder.setupStepsForWasmFirstStageUpToSerialization(
     facadeStep(::WasmPreSerializationLoweringFacade)
     loweredIrHandlersStep {
         commonIrHandlersForCodegenTest()
+        useHandlers(::IrDiagnosticsHandler)
     }
 
     facadeStep(::FirKlibSerializerCliWasmFacade)

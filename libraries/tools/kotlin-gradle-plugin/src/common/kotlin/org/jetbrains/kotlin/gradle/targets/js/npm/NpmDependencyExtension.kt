@@ -3,6 +3,8 @@
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
+@file:Suppress("DEPRECATION") // this whole file is a deprecated API built on top of the deprecated NpmDependency
+
 package org.jetbrains.kotlin.gradle.targets.js.npm
 
 import groovy.lang.Closure
@@ -16,10 +18,20 @@ import org.jetbrains.kotlin.gradle.utils.lowerCamelCaseName
 import org.jetbrains.kotlin.util.capitalizeDecapitalize.toLowerCaseAsciiOnly
 import java.io.File
 
+private const val NPM_DEPENDENCIES_BLOCK_DEPRECATED =
+    "Adding npm dependencies at the top-level dependencies block is no longer supported. " +
+            "It relies on deprecated Gradle internal functionality. " +
+            "Instead, add npm dependencies using the kotlin {} DSL block. " +
+            "Scheduled for removal in Kotlin 2.7."
+
+/** **Deprecated** - see [NpmDependencyExtension] for more information. */
+@Deprecated(NPM_DEPENDENCIES_BLOCK_DEPRECATED)
 interface BaseNpmDependencyExtension {
     operator fun invoke(name: String, version: String): NpmDependency
 }
 
+/** **Deprecated** - see [NpmDependencyExtension] for more information. */
+@Deprecated(NPM_DEPENDENCIES_BLOCK_DEPRECATED)
 interface NpmDirectoryDependencyExtension : BaseNpmDependencyExtension {
     operator fun invoke(name: String, directory: File): NpmDependency
 
@@ -27,32 +39,65 @@ interface NpmDirectoryDependencyExtension : BaseNpmDependencyExtension {
 }
 
 @Deprecated(
-    "Unused interface. A remnant of Dukat integration. Scheduled for removal in 2.6.",
-    ReplaceWith("BaseNpmDependencyExtension")
+    "Unused interface. A remnant of Dukat integration. Scheduled for removal in Kotlin 2.6.",
+    ReplaceWith("BaseNpmDependencyExtension"),
+    level = DeprecationLevel.ERROR,
 )
 interface NpmDependencyWithExternalsExtension : BaseNpmDependencyExtension
 
 @Deprecated(
-    "Unused interface. A remnant of Dukat integration. Scheduled for removal in 2.6.",
-    ReplaceWith("NpmDirectoryDependencyExtension")
+    "Unused interface. A remnant of Dukat integration. Scheduled for removal in Kotlin 2.6.",
+    ReplaceWith("NpmDirectoryDependencyExtension"),
+    level = DeprecationLevel.ERROR
 )
 interface NpmDirectoryDependencyWithExternalsExtension : NpmDirectoryDependencyExtension
 
+/**
+ * **Deprecated**
+ *
+ * Adding npm dependencies at the top-level dependencies block is no longer supported.
+ * It relies on deprecated Gradle internal functionality.
+ *
+ * Instead, add npm dependencies using the `kotlin {}` DSL block.
+ * For example:
+ * ```kotlin
+ * kotlin {
+ *   sourceSets {
+ *     webMain {
+ *       dependencies {
+ *         implementation(npm(...))
+ *       }
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * Scheduled for removal in Kotlin 2.7.
+ */
+@Deprecated(NPM_DEPENDENCIES_BLOCK_DEPRECATED)
 interface NpmDependencyExtension :
+    @Suppress("DEPRECATION")
     BaseNpmDependencyExtension,
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION_ERROR")
     NpmDependencyWithExternalsExtension,
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION_ERROR")
     NpmDirectoryDependencyWithExternalsExtension,
+    @Suppress("DEPRECATION")
     NpmDirectoryDependencyExtension
 
+/** **Deprecated** - see [NpmDependencyExtension] for more information. */
+@Deprecated(NPM_DEPENDENCIES_BLOCK_DEPRECATED)
 interface DevNpmDependencyExtension :
     BaseNpmDependencyExtension,
     NpmDirectoryDependencyExtension
 
+/** **Deprecated** - see [NpmDependencyExtension] for more information. */
+@Deprecated(NPM_DEPENDENCIES_BLOCK_DEPRECATED)
 interface PeerNpmDependencyExtension :
     BaseNpmDependencyExtension
 
+/** **Deprecated** - see [NpmDependencyExtension] for more information. */
+@Deprecated(NPM_DEPENDENCIES_BLOCK_DEPRECATED)
 internal val AddNpmDependencyExtensionProjectSetupAction = KotlinProjectSetupAction {
     val extensions = (dependencies as ExtensionAware).extensions
     values()
@@ -185,7 +230,7 @@ private abstract class NpmDependencyExtensionDelegate(
 }
 
 private class DefaultNpmDependencyExtension(
-    private val project: Project,
+    project: Project,
     scope: NpmDependency.Scope,
 ) : Closure<NpmDependency>(project.dependencies),
     NpmDependencyExtension {
@@ -294,7 +339,7 @@ private class DefaultPeerNpmDependencyExtension(
             name: String,
             directory: File,
         ): NpmDependency =
-            npmDeclarationException(arrayOf(name, directory))
+            npmDeclarationException(arrayOf<Any?>(name, directory))
 
         override fun processNonStringFirstArgument(arg: Any?, vararg args: Any?): NpmDependency =
             npmDeclarationException(args)

@@ -273,18 +273,56 @@ class Collections {
         }
 
         @Sample
+        fun binarySearchFoundNotFound() {
+            val list = mutableListOf('a', 'b', 'c', 'd', 'e')
+            assertPrints(list.binarySearch('d') >= 0, "true") // found
+            assertPrints(list.binarySearch('f') >= 0, "false") // not found
+        }
+
+        @Sample
+        fun binarySearchFindOrInsert() {
+            /**
+             * If the element is found, returns its index.
+             * Otherwise, inserts the element at the correct position and returns its index.
+             */
+            fun findOrInsert(list: MutableList<Char>, element: Char): Int {
+                val index = list.binarySearch(element)
+                if (index < 0) { // element not found
+                    val insertionIndex = index.inv() // same as -(index + 1)
+                    list.add(insertionIndex, element)
+                    return insertionIndex
+                }
+                return index
+            }
+
+            val index1 = findOrInsert(mutableListOf('a', 'b', 'c', 'd', 'e'), 'd')
+            assertPrints(index1, "3")
+            val index2 = findOrInsert(mutableListOf('a', 'b', 'c', 'e'), 'd')
+            assertPrints(index2, "3")
+        }
+
+        @Sample
         fun binarySearchOnComparable() {
             val list = mutableListOf('a', 'b', 'c', 'd', 'e')
             assertPrints(list.binarySearch('d'), "3")
 
             list.remove('d')
 
-            val invertedInsertionPoint = list.binarySearch('d')
-            val actualInsertionPoint = -(invertedInsertionPoint + 1)
-            assertPrints(actualInsertionPoint, "3")
+            val invertedInsertionIndex = list.binarySearch('d')
+            val actualInsertionIndex = invertedInsertionIndex.inv() // same as -(invertedInsertionIndex + 1)
+            assertPrints(actualInsertionIndex, "3")
 
-            list.add(actualInsertionPoint, 'd')
+            list.add(actualInsertionIndex, 'd')
             assertPrints(list, "[a, b, c, d, e]")
+        }
+
+        @Sample
+        fun binarySearchRepeatingElements() {
+            // If multiple equal elements are present, binarySearch could return any one of them.
+            val list1 = mutableListOf('a', 'b', 'b')
+            assertPrints(list1.binarySearch('b'), "1") // could be either 1 or 2
+            val list2 = mutableListOf('a', 'b', 'b', 'c', 'd')
+            assertPrints(list2.binarySearch('b'), "2") // could be either 1 or 2
         }
 
         @Sample
@@ -330,6 +368,35 @@ class Collections {
             } else {
                 println("Box with value=$valueToFind was not found")
             }
+        }
+
+        @Sample
+        fun binarySearchWithComparisonFunctionLowerBoundUpperBound() {
+            // first index such that list[index] >= element, or list.size() if such index doesn't exist
+            fun <T : Comparable<T>> List<T?>.lowerBound(element: T?): Int =
+                binarySearch { if (it != null && element != null && it < element) -1 else 1 }.inv()
+
+            // first index such that list[index] > element, or list.size() if such index doesn't exist
+            fun <T : Comparable<T>> List<T?>.upperBound(element: T?): Int =
+                binarySearch { if (it == null || (element != null && it <= element)) -1 else 1 }.inv()
+
+            // [lowerBound, upperBound) is a semi-interval of all the entries of the element in the list
+
+            val lst1 = mutableListOf('a', 'b', 'b', 'c', 'd', 'e')
+            val lst2 = mutableListOf('a',           'c', 'd', 'e')
+            val lst3 = mutableListOf('a', 'b', 'c')
+            val lst4 = mutableListOf(null, null, 'a', 'b', 'c')
+
+            assertPrints(lst1.lowerBound('b'), "1")
+            assertPrints(lst1.upperBound('b'), "3")
+            assertPrints(lst2.lowerBound('b'), "1")
+            assertPrints(lst2.upperBound('b'), "1")
+            assertPrints(lst3.lowerBound(null), "0")
+            assertPrints(lst3.upperBound(null), "0")
+            assertPrints(lst4.lowerBound(null), "0")
+            assertPrints(lst4.upperBound(null), "2")
+            assertPrints(lst4.lowerBound('d'), "5")
+            assertPrints(lst4.upperBound('d'), "5")
         }
 
         @Sample
@@ -669,6 +736,15 @@ class Collections {
             // Sets do not support duplicates, so there is no way to add yet another 'c'
             assertFalse(set.add('c'))
             assertPrints(set, "[a, b, c]")
+
+            data class User(val name: String)
+
+            val alice = User("Alice")
+            val users = mutableSetOf(alice)
+            val anotherAlice = User("Alice")
+            assertPrints(users.add(anotherAlice), "false")
+            // the original instance of User("Alice") remains in the set after trying to add a duplicate
+            assertPrints(users.single() === alice, "true")
         }
 
         @Sample
@@ -1349,6 +1425,16 @@ class Collections {
         }
 
         @Sample
+        fun first() {
+            val list = listOf(1, 2, 3)
+            assertPrints(list.first(), "1")
+            assertPrints(list.first { it > 1 }, "2")
+            assertFailsWith<NoSuchElementException> { list.first { it > 3 } }
+
+            assertFailsWith<NoSuchElementException> { emptyList<Int>().first() }
+        }
+
+        @Sample
         fun getOrElse() {
             val list = listOf(1, 2, 3)
             assertPrints(list.getOrElse(0) { 42 }, "1")
@@ -1707,5 +1793,23 @@ class Collections {
             assertPrints(cats, "[Scratchy]")
         }
 
+    }
+
+    @Nested
+    inner class Deques {
+
+        @Sample
+        fun arrayDequeAddFirst() {
+            val deque = ArrayDeque(listOf(2, 3, 4))
+            deque.addFirst(1)
+            assertPrints(deque, "[1, 2, 3, 4]")
+        }
+
+        @Sample
+        fun arrayDequeAddLast() {
+            val deque = ArrayDeque(listOf(1, 2, 3))
+            deque.addLast(4)
+            assertPrints(deque, "[1, 2, 3, 4]")
+        }
     }
 }

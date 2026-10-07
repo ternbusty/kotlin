@@ -573,7 +573,7 @@ object ImplementationConfigurator : AbstractFirTreeImplementationConfigurator() 
                 value = "originalExpression.source?.fakeElement(KtFakeSourceElementKind.SmartCastExpression)"
                 withGetter = true
             }
-            additionalImports(fakeElementImport, fakeSourceElementKindImport)
+            additionalImports(fakeSourceElementKindImport)
         }
 
         impl(resolvedNamedReference)
@@ -662,6 +662,9 @@ object ImplementationConfigurator : AbstractFirTreeImplementationConfigurator() 
             defaultFalse("customRenderer", withGetter = true)
         }
         impl(intersectionTypeRef) {
+            defaultFalse("customRenderer", withGetter = true)
+        }
+        impl(unionTypeRef) {
             defaultFalse("customRenderer", withGetter = true)
         }
         noImpl(implicitTypeRef)

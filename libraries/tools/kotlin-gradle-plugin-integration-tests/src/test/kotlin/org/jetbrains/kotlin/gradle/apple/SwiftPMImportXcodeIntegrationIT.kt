@@ -409,7 +409,7 @@ class SwiftPMImportXcodeIntegrationIT : KGPBaseTest() {
 
     @GradleTest
     fun `integrateLinkagePackage task base idempotency check`(version: GradleVersion) {
-        project("emptyxcode", version, buildOptions = defaultBuildOptions.disableConfigurationCacheForGradle7(version)) {
+        project("emptyxcode", version) {
             initDefaultKmpWithLocalSPM()
 
             build(
@@ -433,7 +433,7 @@ class SwiftPMImportXcodeIntegrationIT : KGPBaseTest() {
 
     @GradleTest
     fun `KT-86155 - forEmbedAndSignLinkage prints changed files when linkage package is mutated`(version: GradleVersion) {
-        project("emptyxcode", version, buildOptions = defaultBuildOptions.disableConfigurationCacheForGradle7(version)) {
+        project("emptyxcode", version) {
             initDefaultKmpWithLocalSPM()
 
             // Step 1: generate the synthetic project via the standard flow so it exists on disk.
@@ -451,6 +451,7 @@ class SwiftPMImportXcodeIntegrationIT : KGPBaseTest() {
                 "Sources/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME.m"
             )
             assertTrue(mutatedFile.exists(), "expected generated synthetic source file at $mutatedFile")
+            mutatedFile.toFile().setWritable(true)
             mutatedFile.writeText("// tampered content - KT-86155 reproducer")
 
             val taskName = ":generateSyntheticLinkageSwiftPMImportProjectForEmbedAndSignLinkage"
@@ -701,13 +702,13 @@ class SwiftPMImportXcodeIntegrationIT : KGPBaseTest() {
                     message = "Manifest should contain subprojectA and subprojectB dependencies"
                 )
 
-                assertTrue(
-                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectA").exists(),
+                assertDirectoryExists(
+                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectA"),
                     message = "Subpackage directory for subprojectA should exist"
                 )
 
-                assertTrue(
-                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectB").exists(),
+                assertDirectoryExists(
+                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectB"),
                     message = "Subpackage directory for subprojectB should exist"
                 )
             }
@@ -727,15 +728,14 @@ class SwiftPMImportXcodeIntegrationIT : KGPBaseTest() {
                     message = "Manifest should contain subprojectA dependency"
                 )
 
-                assertTrue(
-                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectA").exists(),
+                assertDirectoryExists(
+                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectA"),
                     message = "Subpackage directory for subprojectA should exist"
                 )
 
-                // https://youtrack.jetbrains.com/issue/KT-82823
-                assertTrue(
-                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectB").exists(),
-                    message = "Subpackage directory for subprojectB exists, should be fixed in KT-82823"
+                assertDirectoryDoesNotExist(
+                    projectPath.resolve("iosApp/$SYNTHETIC_IMPORT_TARGET_MAGIC_NAME/subpackages/_subprojectB"),
+                    message = "Subpackage directory for subprojectB should be removed together with the dependency"
                 )
             }
         }

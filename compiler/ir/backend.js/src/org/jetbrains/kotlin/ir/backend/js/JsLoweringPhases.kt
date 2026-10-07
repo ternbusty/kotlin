@@ -8,6 +8,7 @@ package org.jetbrains.kotlin.ir.backend.js
 import org.jetbrains.kotlin.backend.common.CommonBackendContext
 import org.jetbrains.kotlin.backend.common.LoweringContext
 import org.jetbrains.kotlin.backend.common.ModuleLoweringPass
+import org.jetbrains.kotlin.backend.common.TailrecCheckerLowering
 import org.jetbrains.kotlin.backend.common.lower.*
 import org.jetbrains.kotlin.backend.common.lower.coroutines.AddContinuationToLocalSuspendFunctionsLowering
 import org.jetbrains.kotlin.backend.common.lower.coroutines.AddContinuationToNonLocalSuspendFunctionsLowering
@@ -18,6 +19,7 @@ import org.jetbrains.kotlin.backend.common.phaser.*
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.config.phaser.NamedCompilerPhase
+import org.jetbrains.kotlin.ir.at
 import org.jetbrains.kotlin.ir.backend.js.checkers.JsKlibErrors
 import org.jetbrains.kotlin.ir.backend.js.lower.*
 import org.jetbrains.kotlin.ir.backend.js.lower.calls.CallsLowering
@@ -30,32 +32,7 @@ import org.jetbrains.kotlin.ir.backend.js.lower.inline.RemoveInlineDeclarationsW
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 import org.jetbrains.kotlin.ir.inline.OuterThisInInlineFunctionsSpecialAccessorLowering
 import org.jetbrains.kotlin.ir.inline.SyntheticAccessorLowering
-import org.jetbrains.kotlin.ir.inline.isConsideredAsPrivateForInlining
 import org.jetbrains.kotlin.ir.inline.loweringsOfTheFirstPhase
-import org.jetbrains.kotlin.ir.util.isTypeOfIntrinsic
-
-private fun createIrValidationAfterInliningPrivateFunctionsKlibPhase(context: LoweringContext): IrValidationAfterInliningPrivateFunctionsKlibPhase<LoweringContext> {
-    return IrValidationAfterInliningPrivateFunctionsKlibPhase(
-        context,
-        checkInlineFunctionCallSites = { inlineFunctionUseSite ->
-            // Call sites of only non-private functions are allowed at this stage.
-            !inlineFunctionUseSite.symbol.isConsideredAsPrivateForInlining()
-        }
-    )
-}
-
-private fun createIrValidationAfterInliningAllFunctionsKlibSecondStagePhase(context: LoweringContext): IrValidationAfterInliningAllFunctionsKlibSecondStagePhase<LoweringContext> {
-    return IrValidationAfterInliningAllFunctionsKlibSecondStagePhase(
-        context,
-        checkInlineFunctionCallSites = check@{ inlineFunctionUseSite ->
-            // No inline function call sites should remain at this stage.
-            val inlineFunction = inlineFunctionUseSite.symbol.owner
-            // it's fine to have typeOf<T>, it would be ignored by inliner and handled on the second stage of compilation
-            if (inlineFunction.symbol.isTypeOfIntrinsic()) return@check true
-            return@check inlineFunction.body == null
-        }
-    )
-}
 
 @Suppress("unused")
 private fun createInventNamesForLocalFunctionsPhase(context: JsIrBackendContext): KlibInventNamesForLocalFunctions {
@@ -119,6 +96,7 @@ fun jsLoweringsOfTheFirstPhase(
             this += ::createJsCodeOutliningPhaseOnFirstStage
         }
         this += loweringsOfTheFirstPhase(languageVersionSettings)
+        this += ::TailrecCheckerLowering
     }
     return createModulePhases(*phases.toTypedArray())
 }
@@ -136,22 +114,22 @@ val jsLowerings: List<NamedCompilerPhase<JsIrBackendContext, IrModuleFragment, I
     ::JsPrivateFunctionInlining,
     ::OuterThisInInlineFunctionsSpecialAccessorLowering,
     ::createSyntheticAccessorGenerationPhase,
-    ::createIrValidationAfterInliningPrivateFunctionsKlibPhase,
+    ::IrValidationAfterInliningPrivateFunctionsKlibPhase,
     ::JsAllFunctionInlining,
     ::RedundantCastsRemoverLowering,
-    ::createIrValidationAfterInliningAllFunctionsKlibSecondStagePhase,
+    ::IrValidationAfterInliningAllFunctionsKlibSecondStagePhase,
     // END: Common Native/JS/Wasm prefix.
 
     ::createConstEvaluationPhase,
     ::CopyInlineFunctionBodyLowering,
     ::RemoveInlineDeclarationsWithReifiedTypeParametersLowering,
+    ::ImplicitlyExportedDeclarationsMarkingLowering,
     ::PrepareInlineClassesToBeExportedLowering,
     ::PrepareExportedDefaultImplementationsLowering,
     ::ReplaceSuspendIntrinsicLowering,
     ::PrepareSuspendFunctionsForExportLowering,
     ::ReplaceExportedSuspendFunctionsCallsWithTheirBridgeCall,
     ::IgnoreOriginalSuspendFunctionsThatWereExportedLowering,
-    ::ImplicitlyExportedDeclarationsMarkingLowering,
     ::ExcludeSyntheticDeclarationsFromExportLowering,
     ::JsStaticLowering,
     ::JsInventNamesForLocalClasses,
@@ -242,11 +220,12 @@ val jsLowerings: List<NamedCompilerPhase<JsIrBackendContext, IrModuleFragment, I
     ::CallsLowering,
     ::EscapedIdentifiersLowering,
     ::MainFunctionCallWrapperLowering,
+    ::EffectAnalysisLowering,
     ::CleanupLowering,
     ::IrValidationAfterLoweringsSecondStagePhase,
 )
 
-val optimizationLoweringList: List<NamedCompilerPhase<JsIrBackendContext, IrModuleFragment, IrModuleFragment>> = createModulePhases(
+val optimizationLoweringList: List<NamedCompilerPhase<JsIrOptimizationContext, IrModuleFragment, IrModuleFragment>> = createModulePhases(
     ::ES6CollectConstructorsWhichNeedBoxParameters,
     ::ES6CollectPrimaryConstructorsWhichCouldBeOptimizedLowering,
     ::ES6ConstructorBoxParameterOptimizationLowering,
@@ -254,7 +233,6 @@ val optimizationLoweringList: List<NamedCompilerPhase<JsIrBackendContext, IrModu
     ::ES6PrimaryConstructorUsageOptimizationLowering,
     ::PurifyObjectInstanceGettersLowering,
     ::InlineObjectsWithPureInitializationLowering,
-    ::JsCleanupPurifiedLeftoverDeclarationsLowering,
     ::JsCleanupPurifiedLeftoverUsagesLowering,
     ::MoveCallableFactoriesToDeclarationsLowering,
     ::DeduplicateCallableReferenceFactoriesLowering,

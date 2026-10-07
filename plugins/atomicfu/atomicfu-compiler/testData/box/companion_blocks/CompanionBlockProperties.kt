@@ -1,5 +1,5 @@
+// DUMP_IR_DIFFERENCE: NATIVE
 // LANGUAGE: +CompanionBlocks
-// TARGET_BACKEND: JVM_IR
 
 import kotlinx.atomicfu.*
 import kotlin.test.*

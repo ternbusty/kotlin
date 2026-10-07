@@ -1716,14 +1716,14 @@ KtArrayAccessExpression(803,819): 'map[myClassProp]'
         isSafeNavigation = false
         type = kotlin.collections.Map<MyClass, kotlin.Int>
       signature = KaFunctionSignature:
-        receiverType = kotlin.collections.Map<out MyClass, V>
-        returnType = V?
+        receiverType = kotlin.collections.Map<out K, kotlin.Int>
+        returnType = kotlin.Int?
         symbol = kotlin/collections/get(<extension receiver>: kotlin.collections.Map<out K, V>, key: K): V?
         valueParameters = [
           KaVariableSignature:
             name = key
             receiverType = null
-            returnType = MyClass
+            returnType = K
             symbol = key: K
             contextParameters = []
             callableId = null
@@ -1731,13 +1731,13 @@ KtArrayAccessExpression(803,819): 'map[myClassProp]'
         contextParameters = []
         callableId = kotlin/collections/get
       typeArgumentsMapping = {
-        K -> (MyClass)
+        V -> (kotlin.Int)
       }
       valueArgumentMapping = {
         myClassProp -> (KaVariableSignature:
           name = key
           receiverType = null
-          returnType = MyClass
+          returnType = K
           symbol = key: K
           contextParameters = []
           callableId = null)
@@ -1824,10 +1824,10 @@ KtArrayAccessExpression(831,846): 'map[stringProp]'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<INAPPLICABLE_CANDIDATE: Inapplicable candidate(s): fun get(key: MyClass): Int?>
-    isInBestCandidates = true
+    diagnostic = ERROR<WRONG_NUMBER_OF_TYPE_ARGUMENTS: No type arguments expected for 'fun get(key: MyClass): Int?'.>
+    isInBestCandidates = false
 
-  KaInapplicableCallCandidate:
+  KaApplicableCallCandidate:
     candidate = KaSimpleFunctionCall:
       contextArgumentMapping = {}
       contextArguments = []
@@ -1837,14 +1837,14 @@ KtArrayAccessExpression(831,846): 'map[stringProp]'
         isSafeNavigation = false
         type = kotlin.collections.Map<MyClass, kotlin.Int>
       signature = KaFunctionSignature:
-        receiverType = kotlin.collections.Map<out MyClass, V>
-        returnType = V?
+        receiverType = kotlin.collections.Map<out kotlin.Any, kotlin.Int>
+        returnType = kotlin.Int?
         symbol = kotlin/collections/get(<extension receiver>: kotlin.collections.Map<out K, V>, key: K): V?
         valueParameters = [
           KaVariableSignature:
             name = key
             receiverType = null
-            returnType = MyClass
+            returnType = kotlin.Any
             symbol = key: K
             contextParameters = []
             callableId = null
@@ -1852,19 +1852,19 @@ KtArrayAccessExpression(831,846): 'map[stringProp]'
         contextParameters = []
         callableId = kotlin/collections/get
       typeArgumentsMapping = {
-        K -> (MyClass)
+        K -> (kotlin.Any),
+        V -> (kotlin.Int)
       }
       valueArgumentMapping = {
         stringProp -> (KaVariableSignature:
           name = key
           receiverType = null
-          returnType = MyClass
+          returnType = kotlin.Any
           symbol = key: K
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<INAPPLICABLE_CANDIDATE: Inapplicable candidate(s): fun <K, V> Map<out K, V>.get(key: K): V?>
-    isInBestCandidates = false
+    isInBestCandidates = true
 
 KtNameReferenceExpression(831,834): 'map'
   KaApplicableCallCandidate:
@@ -1958,14 +1958,14 @@ KtArrayAccessExpression(858,878): 'map[NestedInheritor]'
         isSafeNavigation = false
         type = kotlin.collections.Map<MyClass, kotlin.Int>
       signature = KaFunctionSignature:
-        receiverType = kotlin.collections.Map<out MyClass, V>
-        returnType = V?
+        receiverType = kotlin.collections.Map<out K, kotlin.Int>
+        returnType = kotlin.Int?
         symbol = kotlin/collections/get(<extension receiver>: kotlin.collections.Map<out K, V>, key: K): V?
         valueParameters = [
           KaVariableSignature:
             name = key
             receiverType = null
-            returnType = MyClass
+            returnType = K
             symbol = key: K
             contextParameters = []
             callableId = null
@@ -1973,13 +1973,13 @@ KtArrayAccessExpression(858,878): 'map[NestedInheritor]'
         contextParameters = []
         callableId = kotlin/collections/get
       typeArgumentsMapping = {
-        K -> (MyClass)
+        V -> (kotlin.Int)
       }
       valueArgumentMapping = {
         NestedInheritor -> (KaVariableSignature:
           name = key
           receiverType = null
-          returnType = MyClass
+          returnType = K
           symbol = key: K
           contextParameters = []
           callableId = null)
@@ -2420,7 +2420,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun MyClass.contains(that: MyClass): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun MyClass.contains(that: MyClass): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2460,7 +2460,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : ClosedRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : ClosedRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2499,7 +2499,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : OpenEndRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : OpenEndRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2536,7 +2536,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2573,7 +2573,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2610,7 +2610,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2647,7 +2647,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Double>.contains(value: Float): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Double>.contains(value: Float): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2684,7 +2684,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Float>.contains(value: Double): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Float>.contains(value: Double): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2721,7 +2721,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2758,7 +2758,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2795,7 +2795,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2832,7 +2832,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2869,7 +2869,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2906,7 +2906,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2943,7 +2943,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -2980,7 +2980,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3017,7 +3017,7 @@ KtBinaryExpression(1242,1284): 'a !in MyClass.myClassProp..NestedInheritor'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
 KtNameReferenceExpression(1242,1243): 'a'
@@ -3126,7 +3126,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun MyClass.contains(that: MyClass): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun MyClass.contains(that: MyClass): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3166,7 +3166,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : ClosedRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : ClosedRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3205,7 +3205,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : OpenEndRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>, R : OpenEndRange<T>, Iterable<T>> R.contains(element: T?): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3242,7 +3242,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3279,7 +3279,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3316,7 +3316,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Byte>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3353,7 +3353,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Double>.contains(value: Float): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Double>.contains(value: Float): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3390,7 +3390,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Float>.contains(value: Double): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Float>.contains(value: Double): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3427,7 +3427,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3464,7 +3464,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3501,7 +3501,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Int>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3538,7 +3538,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3575,7 +3575,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3612,7 +3612,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Long>.contains(value: Short): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3649,7 +3649,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Byte): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3686,7 +3686,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Int): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
   KaInapplicableCallCandidate:
@@ -3723,7 +3723,7 @@ KtOperationReferenceExpression(1244,1247): '!in'
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun ClosedRange<Short>.contains(value: Long): Boolean' is inapplicable because of a receiver type mismatch. Actual receiver type is 'ClosedFloatingPointRange<MyClass>'.>
     isInBestCandidates = false
 
 KtBinaryExpression(1248,1284): 'MyClass.myClassProp..NestedInheritor'
@@ -3773,33 +3773,31 @@ KtBinaryExpression(1248,1284): 'MyClass.myClassProp..NestedInheritor'
         isSafeNavigation = false
         type = MyClass
       signature = KaFunctionSignature:
-        receiverType = MyClass
-        returnType = kotlin.ranges.ClosedRange<MyClass>
+        receiverType = T
+        returnType = kotlin.ranges.ClosedRange<T>
         symbol = kotlin/ranges/rangeTo(<extension receiver>: T, that: T): kotlin.ranges.ClosedRange<T>
         valueParameters = [
           KaVariableSignature:
             name = that
             receiverType = null
-            returnType = MyClass
+            returnType = T
             symbol = that: T
             contextParameters = []
             callableId = null
         ]
         contextParameters = []
         callableId = kotlin/ranges/rangeTo
-      typeArgumentsMapping = {
-        T -> (MyClass)
-      }
+      typeArgumentsMapping = {}
       valueArgumentMapping = {
         NestedInheritor -> (KaVariableSignature:
           name = that
           receiverType = null
-          returnType = MyClass
+          returnType = T
           symbol = that: T
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>> T.rangeTo(that: T): ClosedRange<T>' is inapplicable for operator '..' because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>> T.rangeTo(that: T): ClosedRange<T>' is inapplicable for operator '..' because of a receiver type mismatch. Actual receiver type is 'MyClass'.>
     isInBestCandidates = false
 
 KtDotQualifiedExpression(1248,1267): 'MyClass.myClassProp'
@@ -3910,33 +3908,31 @@ KtOperationReferenceExpression(1267,1269): '..'
         isSafeNavigation = false
         type = MyClass
       signature = KaFunctionSignature:
-        receiverType = MyClass
-        returnType = kotlin.ranges.ClosedRange<MyClass>
+        receiverType = T
+        returnType = kotlin.ranges.ClosedRange<T>
         symbol = kotlin/ranges/rangeTo(<extension receiver>: T, that: T): kotlin.ranges.ClosedRange<T>
         valueParameters = [
           KaVariableSignature:
             name = that
             receiverType = null
-            returnType = MyClass
+            returnType = T
             symbol = that: T
             contextParameters = []
             callableId = null
         ]
         contextParameters = []
         callableId = kotlin/ranges/rangeTo
-      typeArgumentsMapping = {
-        T -> (MyClass)
-      }
+      typeArgumentsMapping = {}
       valueArgumentMapping = {
         NestedInheritor -> (KaVariableSignature:
           name = that
           receiverType = null
-          returnType = MyClass
+          returnType = T
           symbol = that: T
           contextParameters = []
           callableId = null)
       }
-    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>> T.rangeTo(that: T): ClosedRange<T>' is inapplicable for operator '..' because of a receiver type mismatch.>
+    diagnostic = ERROR<UNRESOLVED_REFERENCE_WRONG_RECEIVER: Candidate 'fun <T : Comparable<T>> T.rangeTo(that: T): ClosedRange<T>' is inapplicable for operator '..' because of a receiver type mismatch. Actual receiver type is 'MyClass'.>
     isInBestCandidates = false
 
 KtNameReferenceExpression(1269,1284): 'NestedInheritor'

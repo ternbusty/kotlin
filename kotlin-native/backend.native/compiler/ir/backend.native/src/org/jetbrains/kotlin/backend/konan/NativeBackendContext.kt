@@ -7,7 +7,6 @@ package org.jetbrains.kotlin.backend.konan
 
 import llvm.LLVMTypeRef
 import org.jetbrains.kotlin.K1Deprecation
-import org.jetbrains.kotlin.backend.common.CommonBackendContext
 import org.jetbrains.kotlin.backend.common.InlineClassesUtils
 import org.jetbrains.kotlin.backend.common.ir.KlibSharedVariablesManager
 import org.jetbrains.kotlin.config.LoggingContext
@@ -26,7 +25,6 @@ import org.jetbrains.kotlin.backend.konan.serialization.KonanPartialModuleDeseri
 import org.jetbrains.kotlin.backend.konan.serialization.TrivialGettersDeserializer
 import org.jetbrains.kotlin.builtins.konan.KonanBuiltIns
 import org.jetbrains.kotlin.cli.common.diagnosticsCollector
-import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.descriptors.ValueClassBackendAgnosticApi
 import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.KtDiagnosticReporterWithImplicitIrBasedContext
@@ -45,17 +43,22 @@ import java.util.concurrent.ConcurrentHashMap
 
 private var IrClass.layoutBuilder: ClassLayoutBuilder? by irAttribute(copyByDefault = false)
 
+/**
+ * @property irModules The list of IR module fragments in the reverse topological order. This list only contains IR modules
+ *   that are treated as "useful", i.e. each of them either was explicitly passed via CLI argument to the compiler or was loaded
+ *   from the Kotlin/Native distribution implicitly and has at least one declaration that has been loaded/linked from it.
+ *   The order is important, e.g., for calling the eager initializers of the libraries, see [LinkKlibsOutput.irModules].
+ */
 internal class NativeBackendContext(
         config: NativeSecondStageCompilationConfig,
-        val sourcesModules: Set<ModuleDescriptor>,
         @OptIn(K1Deprecation::class)
         val builtIns: KonanBuiltIns,
         override val irBuiltIns: IrBuiltIns,
-        val irModules: Map<Path, IrModuleFragment>,
+        val irModules: List<IrModuleFragment>,
         val irLinker: KonanIrLinker,
         override val symbols: BackendNativeSymbols,
-        val symbolTable: ReferenceSymbolTable,
-) : BasicNativeBackendPhaseContext(config), CommonBackendContext {
+        override val symbolTable: ReferenceSymbolTable,
+) : BasicNativeBackendPhaseContext(config), NativeLoweringContext {
     override val configuration get() = config.configuration
 
     override val irFactory: IrFactory = IrFactoryImpl
@@ -68,9 +71,9 @@ internal class NativeBackendContext(
                 klass.isInlineClass(treatCompatibleFullValueClassesAsInline = true)
     }
     override val innerClassesSupport: NativeInnerClassesSupport by lazy { NativeInnerClassesSupport(irFactory) }
-    val bridgesSupport by lazy { BridgesSupport(irBuiltIns, symbols, irFactory) }
-    val enumsSupport by lazy { EnumsSupport(irBuiltIns, irFactory) }
-    val cachesAbiSupport by lazy { CachesAbiSupport(irFactory) }
+    override val bridgesSupport by lazy { BridgesSupport(irBuiltIns, symbols, irFactory) }
+    override val enumsSupport by lazy { EnumsSupport(irBuiltIns, irFactory) }
+    override val cachesAbiSupport by lazy { CachesAbiSupport(irFactory) }
 
     override val sharedVariablesManager by lazy {
         // Creating lazily because builtIns module seems to be incomplete during `link` test;

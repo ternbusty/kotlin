@@ -11,6 +11,8 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 import org.jetbrains.kotlin.gradle.targets.js.allDependenciesInternal
+import org.jetbrains.kotlin.gradle.targets.js.internal.checkIsJsToolingProject
+import org.jetbrains.kotlin.gradle.targets.js.internal.jsToolingProject
 import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootPlugin.Companion.TASKS_GROUP_NAME
 import org.jetbrains.kotlin.gradle.targets.js.npm.KotlinNpmResolutionManager
 import org.jetbrains.kotlin.gradle.targets.js.npm.LockCopyTask
@@ -73,9 +75,6 @@ internal constructor(
         target: Project,
     ) {
         val nodeJsRoot = target.extensions.getByName(WasmNodeJsRootExtension.EXTENSION_NAME) as WasmNodeJsRootExtension
-
-        @Suppress("DEPRECATION_ERROR")
-        nodeJsRoot.version = "26.2.0"
 
         val nodeJs = target.extensions.getByName(WasmNodeJsEnvSpec.EXTENSION_NAME) as WasmNodeJsEnvSpec
 
@@ -145,9 +144,12 @@ internal constructor(
 
     companion object : HasPlatformDisambiguator by WasmPlatformDisambiguator {
         fun apply(rootProject: Project): WasmNodeJsRootExtension {
-            check(rootProject == rootProject.rootProject)
-            rootProject.plugins.apply(WasmNodeJsRootPlugin::class.java)
-            return rootProject.extensions.getByName(WasmNodeJsRootExtension.EXTENSION_NAME) as WasmNodeJsRootExtension
+            checkIsJsToolingProject(rootProject) {
+                "Cannot register ${WasmNodeJsRootPlugin::class.simpleName} in ${rootProject.displayName}. It can only be registered in ${rootProject.jsToolingProject().displayName}."
+            }
+            val toolingProject = rootProject.jsToolingProject()
+            toolingProject.plugins.apply(WasmNodeJsRootPlugin::class.java)
+            return toolingProject.extensions.getByName(WasmNodeJsRootExtension.EXTENSION_NAME) as WasmNodeJsRootExtension
         }
 
         val Project.kotlinNodeJsRootExtension: WasmNodeJsRootExtension

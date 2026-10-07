@@ -9,12 +9,11 @@ import org.jetbrains.kotlin.backend.common.FileLoweringPass
 import org.jetbrains.kotlin.backend.common.lower.IrBuildingTransformer
 import org.jetbrains.kotlin.backend.common.lower.at
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
+import org.jetbrains.kotlin.backend.common.serialization.kotlinLibrary
 import org.jetbrains.kotlin.backend.konan.*
-import org.jetbrains.kotlin.backend.konan.NativeBackendContext
 import org.jetbrains.kotlin.backend.konan.descriptors.synthesizedName
 import org.jetbrains.kotlin.backend.konan.ir.buildSimpleAnnotation
 import org.jetbrains.kotlin.backend.konan.ir.isUnit
-import org.jetbrains.kotlin.backend.konan.ir.konanLibrary
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.builders.declarations.*
 import org.jetbrains.kotlin.ir.declarations.*
@@ -28,7 +27,7 @@ import org.jetbrains.kotlin.utils.addToStdlib.getOrSetIfNull
 
 private var IrClass.objectClassInstanceFunction: IrSimpleFunction? by irAttribute(copyByDefault = false)
 
-internal fun NativeBackendContext.getObjectClassInstanceFunction(clazz: IrClass) = clazz::objectClassInstanceFunction.getOrSetIfNull {
+internal fun NativeLoweringContext.getObjectClassInstanceFunction(clazz: IrClass) = clazz::objectClassInstanceFunction.getOrSetIfNull {
     when {
         clazz.isUnit() -> symbols.theUnitInstance.owner
         clazz.isCompanion -> {
@@ -82,7 +81,7 @@ internal class ObjectClassLowering(val generationState: NativeGenerationState) :
                 val companionIndex = declaration.declarations.indexOfFirst { (it as? IrClass)?.isCompanion == true }
                 if (companionIndex != -1) {
                     val companionDeclaration = declaration.declarations[companionIndex] as IrClass
-                    val addAtIndex = if (declaration.konanLibrary?.newCompanionInitializationEnabled == true) {
+                    val addAtIndex = if (declaration.moduleFragment.kotlinLibrary?.newCompanionInitializationEnabled == true) {
                         // With the initialization order, the `companion object` and `companion` blocks should be initialized
                         // following the program order. So, the field holding `companion object` instance should be placed
                         // next to the `companion object` to preserve the program order.

@@ -12,6 +12,7 @@ import org.jetbrains.kotlin.platform.konan.NativePlatforms
 import org.jetbrains.kotlin.test.FirParser
 import org.jetbrains.kotlin.test.TargetBackend
 import org.jetbrains.kotlin.test.backend.BlackBoxCodegenSuppressor
+import org.jetbrains.kotlin.test.backend.ir.IrDiagnosticsHandler
 import org.jetbrains.kotlin.test.builders.*
 import org.jetbrains.kotlin.test.configuration.commonCodegenConfiguration
 import org.jetbrains.kotlin.test.configuration.commonFirHandlersForCodegenTest
@@ -23,7 +24,6 @@ import org.jetbrains.kotlin.test.directives.model.ValueDirective
 import org.jetbrains.kotlin.test.frontend.fir.handlers.*
 import org.jetbrains.kotlin.test.model.DependencyKind
 import org.jetbrains.kotlin.test.model.FrontendKinds
-import org.jetbrains.kotlin.test.services.LibraryProvider
 import org.jetbrains.kotlin.test.services.sourceProviders.AdditionalDiagnosticsSourceFilesProvider
 import org.jetbrains.kotlin.test.services.sourceProviders.CoroutineHelpersSourceFilesProvider
 import org.jetbrains.kotlin.utils.bind
@@ -61,7 +61,6 @@ fun TestConfigurationBuilderBase<*, *>.commonConfigurationForNativeCodegenTest(
     }
     configureFirParser(firParser)
 
-    useAdditionalService(::LibraryProvider)
     useAdditionalSourceProviders(
         ::CoroutineHelpersSourceFilesProvider,
         ::AdditionalDiagnosticsSourceFilesProvider,
@@ -103,5 +102,7 @@ fun TestConfigurationBuilder.setupStepsForNativeFirstStageUpToSerialization(
     }
 
     facadeStep(::NativePreSerializationLoweringCliFacade)
-    loweredIrHandlersStep()
+    loweredIrHandlersStep {
+        useHandlers(::IrDiagnosticsHandler)
+    }
 }

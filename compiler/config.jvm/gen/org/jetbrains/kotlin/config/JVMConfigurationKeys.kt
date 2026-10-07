@@ -102,10 +102,6 @@ object JVMConfigurationKeys {
     @JvmField
     val ABI_STABILITY = CompilerConfigurationKey.create<JvmAbiStability>("ABI_STABILITY")
 
-    // When using K1, do not clear BindingContext between psi2ir and lowerings.
-    @JvmField
-    val DO_NOT_CLEAR_BINDING_CONTEXT = CompilerConfigurationKey.create<Boolean>("DO_NOT_CLEAR_BINDING_CONTEXT")
-
     @JvmField
     val NO_RESET_JAR_TIMESTAMPS = CompilerConfigurationKey.create<Boolean>("NO_RESET_JAR_TIMESTAMPS")
 
@@ -128,6 +124,10 @@ object JVMConfigurationKeys {
     @JvmField
     val NO_REFLECT = CompilerConfigurationKey.create<Boolean>("NO_REFLECT")
 
+    // Don't automatically include the Kotlin/JVM stdlib and kotlin-reflect into the classpath.
+    @JvmField
+    val NO_STDLIB = CompilerConfigurationKey.create<Boolean>("NO_STDLIB")
+
     @JvmField
     val VALIDATE_BYTECODE = CompilerConfigurationKey.create<Boolean>("VALIDATE_BYTECODE")
 
@@ -141,10 +141,6 @@ object JVMConfigurationKeys {
     // Do not generate Java 1.8+ targets for Kotlin annotation classes.
     @JvmField
     val NO_NEW_JAVA_ANNOTATION_TARGETS = CompilerConfigurationKey.create<Boolean>("NO_NEW_JAVA_ANNOTATION_TARGETS")
-
-    // Use inline scopes numbers for inline marker variables.
-    @JvmField
-    val USE_INLINE_SCOPES_NUMBERS = CompilerConfigurationKey.create<Boolean>("USE_INLINE_SCOPES_NUMBERS")
 
     // Enable internal mode which causes FIR2IR to skip function bodies, used in KAPT.
     @JvmField
@@ -284,10 +280,6 @@ var CompilerConfiguration.abiStability: JvmAbiStability?
     get() = get(JVMConfigurationKeys.ABI_STABILITY)
     set(value) { put(JVMConfigurationKeys.ABI_STABILITY, requireNotNull(value) { "nullable values are not allowed" }) }
 
-var CompilerConfiguration.doNotClearBindingContext: Boolean
-    get() = getBoolean(JVMConfigurationKeys.DO_NOT_CLEAR_BINDING_CONTEXT)
-    set(value) { put(JVMConfigurationKeys.DO_NOT_CLEAR_BINDING_CONTEXT, value) }
-
 var CompilerConfiguration.noResetJarTimestamps: Boolean
     get() = getBoolean(JVMConfigurationKeys.NO_RESET_JAR_TIMESTAMPS)
     set(value) { put(JVMConfigurationKeys.NO_RESET_JAR_TIMESTAMPS, value) }
@@ -312,6 +304,10 @@ var CompilerConfiguration.noReflect: Boolean
     get() = getBoolean(JVMConfigurationKeys.NO_REFLECT)
     set(value) { put(JVMConfigurationKeys.NO_REFLECT, value) }
 
+var CompilerConfiguration.noStdlib: Boolean
+    get() = getBoolean(JVMConfigurationKeys.NO_STDLIB)
+    set(value) { put(JVMConfigurationKeys.NO_STDLIB, value) }
+
 var CompilerConfiguration.validateBytecode: Boolean
     get() = getBoolean(JVMConfigurationKeys.VALIDATE_BYTECODE)
     set(value) { put(JVMConfigurationKeys.VALIDATE_BYTECODE, value) }
@@ -327,10 +323,6 @@ var CompilerConfiguration.enhancedCoroutinesDebugging: Boolean
 var CompilerConfiguration.noNewJavaAnnotationTargets: Boolean
     get() = getBoolean(JVMConfigurationKeys.NO_NEW_JAVA_ANNOTATION_TARGETS)
     set(value) { put(JVMConfigurationKeys.NO_NEW_JAVA_ANNOTATION_TARGETS, value) }
-
-var CompilerConfiguration.useInlineScopesNumbers: Boolean
-    get() = getBoolean(JVMConfigurationKeys.USE_INLINE_SCOPES_NUMBERS)
-    set(value) { put(JVMConfigurationKeys.USE_INLINE_SCOPES_NUMBERS, value) }
 
 var CompilerConfiguration.skipBodies: Boolean
     get() = getBoolean(JVMConfigurationKeys.SKIP_BODIES)

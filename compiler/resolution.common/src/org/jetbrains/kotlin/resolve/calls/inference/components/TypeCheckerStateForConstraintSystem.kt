@@ -6,8 +6,10 @@
 package org.jetbrains.kotlin.resolve.calls.inference.components
 
 import org.jetbrains.kotlin.builtins.functions.AllowedToUsedOnlyInK1
+import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.config.LanguageFeature.InferenceEnhancementsIn21
 import org.jetbrains.kotlin.config.LanguageVersionSettings
+import org.jetbrains.kotlin.resolve.calls.inference.model.Constraint
 import org.jetbrains.kotlin.types.AbstractNullabilityChecker
 import org.jetbrains.kotlin.types.AbstractTypeChecker
 import org.jetbrains.kotlin.types.TypeCheckerState
@@ -25,12 +27,28 @@ abstract class TypeCheckerStateForConstraintSystem(
     baseTypeCheckerState.kotlinTypePreparator,
     baseTypeCheckerState.kotlinTypeRefiner,
 ) {
+    /**
+     * A part of the artificial-flexibility hack for flexible type variables.
+     * This flag tracks that the constraint comes from an EQUALITY input constraint on a flexible type variable like `T! == SomeType`
+     * and enforce not to set [Constraint.forceInflexibilityForUpperTypeAtDirectIncorporation] to true because we make an
+     * exception for EQUALITY.
+     * TODO: Remove it once KT-88593 is addressed, thus we always would reduce `T! <: SomeType` to `T <: SomeType`
+     */
+    private var isEqualityConstraintForFlexibleTypeVariable = false
     abstract val languageVersionSettings: LanguageVersionSettings
 
     abstract fun isMyTypeVariable(type: RigidTypeMarker): Boolean
 
     // super and sub type isSingleClassifierType
-    abstract fun addUpperConstraint(typeVariable: TypeConstructorMarker, superType: KotlinTypeMarker, isNoInfer: Boolean)
+    abstract fun addUpperConstraint(
+        typeVariable: TypeConstructorMarker, superType: KotlinTypeMarker,
+        isNoInfer: Boolean,
+        /**
+         * If we're processing T! <: SomeType case, but not T! = SomeType
+         * @see Constraint.forceInflexibilityForUpperTypeAtDirectIncorporation
+         */
+        isUpperConstraintMadeFlexibleNotEqualityPosition: Boolean = false,
+    )
 
     abstract fun addLowerConstraint(
         typeVariable: TypeConstructorMarker,
@@ -93,6 +111,23 @@ abstract class TypeCheckerStateForConstraintSystem(
 
         if (result == null && result2 == null) return null
         return (result ?: true) && (result2 ?: true)
+    }
+
+    override fun runForEquality(
+        a: KotlinTypeMarker,
+        b: KotlinTypeMarker,
+        block: () -> Boolean,
+    ): Boolean {
+        return try {
+            isEqualityConstraintForFlexibleTypeVariable = a.isFlexibleTypeVariable() || b.isFlexibleTypeVariable()
+            block()
+        } finally {
+            isEqualityConstraintForFlexibleTypeVariable = false
+        }
+    }
+
+    private fun KotlinTypeMarker.isFlexibleTypeVariable(): Boolean = context(extensionTypeContext) {
+        asFlexibleType()?.lowerBound()?.isTypeVariableType() == true
     }
 
     private fun extractTypeForProjectedType(type: KotlinTypeMarker, out: Boolean): KotlinTypeMarker? = with(extensionTypeContext) {
@@ -319,17 +354,15 @@ abstract class TypeCheckerStateForConstraintSystem(
                 when (subType) {
                     is RigidTypeMarker ->
                         when {
-                            // TODO: consider dropping this branch in 2.5 timeframe (KT-84664)
-                            usePreciseSimplificationToFlexibleLowerConstraint() ->
-                                // Foo <: T! -- (Foo!! .. Foo) <: T
-                                // Foo? <: T! -- (Foo!! .. Foo?) <: T
-                                createTrivialFlexibleTypeOrSelf(
-                                    subType.makeDefinitelyNotNullOrNotNull(),
-                                )
                             // Foo <: T! -- Foo! <: T
                             !subType.isMarkedNullable() -> createTrivialFlexibleTypeOrSelf(subType)
                             // Foo? <: T! -- Foo? <: T
                             else -> subType
+                            // Both simplifications in this when are unprecise.
+                            // It would be more precise to use the following instead
+                            //     Foo <: T! -- (Foo!! .. Foo) <: T
+                            //     Foo? <: T! -- (Foo!! .. Foo?) <: T
+                            // Unfortunately, this attempt breaks too much, see KT-84664
                         }
 
                     is FlexibleTypeMarker ->
@@ -411,9 +444,6 @@ abstract class TypeCheckerStateForConstraintSystem(
         }
     }
 
-    private val simplifyFlexibleUpperConstraintWithDnnBoundToNullable: Boolean =
-        extensionTypeContext.simplifyFlexibleUpperConstraintWithDnnBoundToNullable()
-
     /**
      * T! <: Foo <=> T <: Foo!
      * T? <: Foo <=> T <: Foo && Nothing? <: Foo
@@ -427,27 +457,48 @@ abstract class TypeCheckerStateForConstraintSystem(
     ): Boolean = with(extensionTypeContext) {
         val typeVariableLowerBound = typeVariable.lowerBoundIfFlexible()
 
-        val simplifiedSuperType = if (typeVariable.isFlexible()) {
-            if (typeVariableLowerBound.isDefinitelyNotNullType() && simplifyFlexibleUpperConstraintWithDnnBoundToNullable) {
-                // This is the legacy behavior typically disabled in K2 because the LF is turned off and has no sinceVersion.
-                superType.withNullability(true)
-            } else if (superType.isRigidType()) {
-                createTrivialFlexibleTypeOrSelf(superType)
-            } else {
-                superType
-            }
-        } else if (typeVariableLowerBound.isDefinitelyNotNullType()) {
-            superType.withNullability(true)
-        } else {
-            superType
+        val newUpperConstraintType = when {
+            // T & Any <: Foo <=> T <: Foo?
+            // T & Any .. T? <: Foo <=> T <: Foo?
+            typeVariableLowerBound.isDefinitelyNotNullType() -> superType.withNullability(true)
+            // T..T? <: Foo => T <: Foo!
+            // Generally, this rule doesn't look correct, for example because substitution [T=Foo?] should lead
+            // to CS violation as Foo?..Foo? is simplified as Foo? which is not a subtype of Foo.
+            // But otherwise, it leads to some breaking changes and a matter of investigation at (KT-88593)
+            typeVariable.isFlexible() -> createTrivialFlexibleTypeOrSelf(superType)
+            else -> superType
         }
 
-        addUpperConstraint(typeVariableLowerBound.typeConstructor(), simplifiedSuperType, isNoInfer)
+        val isUpperConstraintMadeFlexible = superType.isRigidType() && newUpperConstraintType.isFlexible()
 
+        addUpperConstraint(
+            typeVariableLowerBound.typeConstructor(), newUpperConstraintType, isNoInfer,
+            isUpperConstraintMadeFlexibleNotEqualityPosition = isUpperConstraintMadeFlexible && !isEqualityConstraintForFlexibleTypeVariable
+        )
+
+        // T? <: Type
         if (typeVariableLowerBound.isMarkedNullable()) {
-            // here is important that superType is singleClassifierType
-            return simplifiedSuperType.anyBound(::isMyTypeVariable) ||
-                    isSubtypeOfByTypeChecker(nullableNothingType(), simplifiedSuperType)
+            // T? <: F (or F! or F?)
+            val supertypeIsTypeVariable = newUpperConstraintType.anyBound(::isMyTypeVariable)
+            // This only happens for EliminateSecondKindIncorporation because previously such nullability constraints have been
+            // introduced via `insideOtherConstraint` which is turned off with this feature.
+            //
+            // For T? <: F! or T? <: F?, `Nothing?` constraint doesn't bring anything useful
+            // But in case of flexible version, might be even harmful (see javaFunctionParamNullability.kt test)
+            if (supertypeIsTypeVariable
+                && languageVersionSettings.supportsFeature(LanguageFeature.EliminateSecondKindIncorporation)
+                && !newUpperConstraintType.upperBoundIfFlexible().isMarkedNullable()
+            ) {
+                // For T? <: F => add Nothing? <: F
+                simplifyLowerConstraint(
+                    typeVariable = newUpperConstraintType,
+                    subType = nullableNothingType(),
+                    isNoInfer,
+                    isFromNullabilityConstraint = true
+                )
+            }
+
+            return supertypeIsTypeVariable || isSubtypeOfByTypeChecker(nullableNothingType(), newUpperConstraintType)
         }
 
         return true
@@ -504,18 +555,14 @@ abstract class TypeCheckerStateForConstraintSystem(
 
     private fun assertInputTypes(subType: KotlinTypeMarker, superType: KotlinTypeMarker): Unit = with(typeSystemContext) {
         if (!AbstractTypeChecker.RUN_SLOW_ASSERTIONS) return
-        fun correctSubType(subType: RigidTypeMarker) =
-            subType.isSingleClassifierType() || subType.typeConstructor()
-                .isIntersection() || isMyTypeVariable(subType) || subType.isError() || subType.isIntegerLiteralType()
+        fun correctType(type: RigidTypeMarker) =
+            type.isSingleClassifierType() || type.typeConstructor().let { it.isIntersection() || it.isUnion() }||
+                    isMyTypeVariable(type) || type.isError() || type.isIntegerLiteralType()
 
-        fun correctSuperType(superType: RigidTypeMarker) =
-            superType.isSingleClassifierType() || superType.typeConstructor()
-                .isIntersection() || isMyTypeVariable(superType) || superType.isError() || superType.isIntegerLiteralType()
-
-        assert(subType.bothBounds(::correctSubType)) {
+        assert(subType.bothBounds(::correctType)) {
             "Not singleClassifierType and not intersection subType: $subType"
         }
-        assert(superType.bothBounds(::correctSuperType)) {
+        assert(superType.bothBounds(::correctType)) {
             "Not singleClassifierType superType: $superType"
         }
     }

@@ -7,9 +7,10 @@ package org.jetbrains.kotlin.backend.konan
 
 import org.jetbrains.kotlin.backend.common.LoadedNativeKlibs
 import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.config.CompilerConfigurationKey
 import org.jetbrains.kotlin.config.metadataKlib
+import org.jetbrains.kotlin.descriptors.ModuleDescriptor
 import org.jetbrains.kotlin.konan.config.NativeConfigurationKeys
-import org.jetbrains.kotlin.konan.config.konanFriendLibraries
 import org.jetbrains.kotlin.konan.config.konanIncludedBinaries
 import org.jetbrains.kotlin.konan.config.konanNativeLibraries
 import org.jetbrains.kotlin.konan.config.konanOutputPath
@@ -44,9 +45,6 @@ interface NativeCompilationConfig {
     val metadataKlib: Boolean
         get() = configuration.metadataKlib
 
-    val friendModuleFiles: Set<Path>
-        get() = configuration.konanFriendLibraries.map { Path(it) }.toSet()
-
     val refinesModuleFiles: Set<Path>
         get() = configuration.konanRefinesModules.map { Path(it) }.toSet()
 
@@ -70,3 +68,15 @@ interface NativeCompilationConfig {
     val outputPath: String
         get() = configuration.konanOutputPath?.removeSuffixIfPresent(produce.suffix(target)) ?: produce.visibleName
 }
+
+/**
+ * Modules that are compiled from sources in the current compilation:
+ * the module being compiled plus the modules of the included (`-Xinclude`) libraries.
+ *
+ * Set by the frontend phase of the second compilation stage; absent during the first (src -> klib) stage.
+ */
+val SOURCES_MODULES = CompilerConfigurationKey.create<Set<ModuleDescriptor>>("SOURCES_MODULES")
+
+var CompilerConfiguration.sourcesModules: Set<ModuleDescriptor>?
+    get() = get(SOURCES_MODULES)
+    set(value) { put(SOURCES_MODULES, requireNotNull(value) { "nullable values are not allowed" }) }

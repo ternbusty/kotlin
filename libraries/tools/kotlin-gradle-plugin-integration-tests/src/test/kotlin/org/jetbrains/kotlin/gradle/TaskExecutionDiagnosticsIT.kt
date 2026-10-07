@@ -105,7 +105,7 @@ class TaskExecutionDiagnosticsIT : KGPBaseTest() {
             gradleVersion,
             btaVersion = null,
             expectedSeverity = KotlinToolingDiagnosticsSeverity.ERROR, // it's rendered as ERROR because of warning-mode=fail
-            customizedKotlinVersion = KotlinVersion.KOTLIN_2_0,
+            customizedKotlinVersion = KotlinVersion.firstSupported, // FIXME(KT-69597): Previously hardcoded to language version 2.0.
         )
 
     @DisplayName("KT-79851: emit unsupported language version kotlin-dsl diagnostic, custom compiler via BTA with deprecation")
@@ -141,8 +141,6 @@ class TaskExecutionDiagnosticsIT : KGPBaseTest() {
                     kotlin("jvm")
                     id("kotlin-dsl")
                 }
-                // before Gradle 8.2, kotlin-dsl plugin configured the versions in afterEvaluate, forcing usage of afterEvaluate to override its configuration
-                val haveToUseAfterEvaluate = gradleVersion < GradleVersion.version("8.2")
                 buildScriptInjection {
                     project.applyJvm {
                         jvmToolchain(17)
@@ -158,12 +156,7 @@ class TaskExecutionDiagnosticsIT : KGPBaseTest() {
                             it.compilerOptions.languageVersion.set(customizedKotlinVersion)
                         }
                     }
-                    if (haveToUseAfterEvaluate) {
-                        project.afterEvaluate { configureKotlin() }
-                    } else {
-                        configureKotlin()
-                    }
-
+                    configureKotlin()
                 }
 
                 kotlinSourcesDir().source("main.kt") {
@@ -199,7 +192,6 @@ class TaskExecutionDiagnosticsIT : KGPBaseTest() {
 
     @GradleTest
     @OtherGradlePluginTests
-    @GradleTestVersions(minVersion = TestVersions.Gradle.G_8_8)
     fun `karOrKarXZFilesInCompileClasspathAreReported - native`(gradleVersion: GradleVersion) {
         nativeProject("native-simple-project", gradleVersion) {
             val unsupportedLibraryPaths = listOf("foo.kar", "bar.kar.xz").map { fileName ->
@@ -225,7 +217,6 @@ class TaskExecutionDiagnosticsIT : KGPBaseTest() {
 
     @GradleTest
     @OtherGradlePluginTests
-    @GradleTestVersions(minVersion = TestVersions.Gradle.G_8_8)
     fun `karOrKarXZFilesInCompileClasspathAreReported - js`(gradleVersion: GradleVersion) {
         project(
             "kotlin-js-plugin-project", gradleVersion,

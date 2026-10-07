@@ -4,12 +4,11 @@ import org.jetbrains.kotlin.testFederation.testFederationDomains
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("jvm")
     id("java-test-fixtures")
-    id("project-tests-convention")
     id("test-inputs-check")
+    id("test-coverage-convention")
     id("require-explicit-types")
 }
 
@@ -101,7 +100,11 @@ projectTests {
     testData(project(":compiler:tests-spec").isolated, "testData/codegen")
 
     val environment = listOf(JdkMajorVersion.JDK_1_8, JdkMajorVersion.JDK_11_0, JdkMajorVersion.JDK_17_0, JdkMajorVersion.JDK_21_0)
-    testTask(defineJDKEnvVariables = environment) {
+    testTask(
+        defineJDKEnvVariables = environment,
+        maxHeapSize = testMaxHeapSizeLarge,
+        garbageCollector = GarbageCollector.Parallel
+    ) {
         configure()
     }
 
@@ -109,6 +112,8 @@ projectTests {
         "aggregateTests",
         defineJDKEnvVariables = environment,
         skipInLocalBuild = true,
+        maxHeapSize = testMaxHeapSizeLarge,
+        garbageCollector = GarbageCollector.Parallel
     ) {
         configure {
             excludeTags("FirPsiCodegenTest")
@@ -128,7 +133,6 @@ projectTests {
     testGenerator("org.jetbrains.kotlin.test.TestGeneratorForFir2IrTestsKt", generateTestsInBuildDirectory = true)
 
     withJvmStdlibAndReflect()
-    withScriptRuntime()
     withMockJdkAnnotationsJar()
     withTestJar()
     withScriptingPlugin()

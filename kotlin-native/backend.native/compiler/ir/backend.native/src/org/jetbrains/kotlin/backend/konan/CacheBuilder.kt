@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.analyzer.CompilationErrorException
 import org.jetbrains.kotlin.backend.common.serialization.FingerprintHash
 import org.jetbrains.kotlin.backend.common.serialization.SerializedIrFileFingerprint
 import org.jetbrains.kotlin.backend.common.serialization.SerializedKlibFingerprint
+import org.jetbrains.kotlin.backend.konan.library.KlibDAG
 import org.jetbrains.kotlin.backend.konan.util.compilerFingerprint
 import org.jetbrains.kotlin.backend.konan.util.reportCompilationErrorAndThrow
 import org.jetbrains.kotlin.cli.reportLog
@@ -22,7 +23,6 @@ import org.jetbrains.kotlin.library.KotlinLibrary
 import org.jetbrains.kotlin.library.isNativeStdlib
 import org.jetbrains.kotlin.library.metadata.isCInteropLibrary
 import org.jetbrains.kotlin.library.uniqueName
-import org.jetbrains.kotlin.library.unresolvedDependencies
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
@@ -38,24 +38,8 @@ import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
+import kotlin.io.path.pathString
 import kotlin.io.path.writeText
-
-internal fun KotlinLibrary.getAllTransitiveDependencies(allLibraries: Map<String, KotlinLibrary>): List<KotlinLibrary> {
-    val allDependencies = mutableSetOf<KotlinLibrary>()
-
-    fun traverseDependencies(library: KotlinLibrary) {
-        library.unresolvedDependencies.forEach {
-            val dependency = allLibraries[it.path] ?: return@forEach
-            if (dependency !in allDependencies) {
-                allDependencies += dependency
-                traverseDependencies(dependency)
-            }
-        }
-    }
-
-    traverseDependencies(this)
-    return allDependencies.toList()
-}
 
 // TODO: deleteRecursively might throw an exception!
 class CacheBuilder(
@@ -65,7 +49,8 @@ class CacheBuilder(
     private val configuration = config.configuration
     private val autoCacheableFrom = configuration[NativeConfigurationKeys.AUTO_CACHEABLE_FROM]!!.map { Path(Path(it).canonicalPathString()) }
     private val icEnabled = configuration[CommonConfigurationKeys.INCREMENTAL_COMPILATION]!!
-    private val includedLibraries = configuration.konanIncludedLibraries.toSet()
+    private val includedLibraries = configuration.konanIncludedLibraries
+            .map { Path(it).canonicalPathString() }.toSet()
     private val generateTestRunner = configuration.getNotNull(NativeConfigurationKeys.GENERATE_TEST_RUNNER)
 
     fun needToBuild() = config.ignoreCacheReason == null
@@ -73,11 +58,11 @@ class CacheBuilder(
             && (autoCacheableFrom.isNotEmpty() || icEnabled)
 
     // Note: The order of libraries is not important here.
-    private val allLibraries by lazy { config.resolvedLibraries.getFullList() }
+    private val klibDag: KlibDAG
+        get() = config.cacheSupport.klibDag
 
     // Note: It's not totally clear, but likely the libraries in `uniqueNameToLibrary` should be in the reverse topo-order.
-    // TODO(KT-61096): Use RTO of libraries here after switching to KlibLoader.
-    private val uniqueNameToLibrary by lazy { allLibraries.associateBy { it.uniqueName } }
+    private val uniqueNameToLibrary by lazy { klibDag.librariesReverseTopoSorted.associateBy { it.uniqueName } }
     private val uniqueNameToHash = mutableMapOf<String, FingerprintHash>()
 
     private val caches = mutableMapOf<KotlinLibrary, CachedLibraries.Cache>()
@@ -121,7 +106,7 @@ class CacheBuilder(
     // contribute to the fingerprint: changes in the per-file cached dependencies are tracked by the dirty-file analysis,
     // and the distribution libraries only change together with the compiler fingerprint (they live in compiler's dist directory).
     private fun computeDependenciesFingerprint(library: KotlinLibrary): FingerprintHash {
-        val monolithicallyCachedDependencies = library.getAllTransitiveDependencies(uniqueNameToLibrary).filter {
+        val monolithicallyCachedDependencies = klibDag.getAllDependencies(library).filter {
             !it.isCachedPerFile && !it.isImplicitlyLoadedFromKotlinNativeDistribution && !it.isNativeStdlib
         }
         return CachedLibraries.computeDependenciesFingerprint(monolithicallyCachedDependencies, uniqueNameToHash)
@@ -161,8 +146,7 @@ class CacheBuilder(
         val lastRebuiltArchives = mutableListOf<Path>()
 
         // Note: The libraries should be in the reverse topo-order here!
-        // TODO(KT-61096): Use RTO of libraries here after switching to KlibLoader.
-        allLibraries.forEach { library ->
+        klibDag.librariesReverseTopoSorted.forEach { library ->
             // For MinGW target avoid compiling caches for anything except stdlib.
             if (config.target == KonanTarget.MINGW_X64 && !library.isNativeStdlib) {
                 return@forEach
@@ -178,8 +162,7 @@ class CacheBuilder(
             } else {
                 if (cache == null) externalLibrariesToCache += library
             }
-            library.unresolvedDependencies.forEach dependenciesLoop@{
-                val dependency = uniqueNameToLibrary[it.path] ?: return@dependenciesLoop
+            klibDag.getDirectDependencies(library).forEach { dependency ->
                 dependableLibraries.getOrPut(dependency) { mutableListOf() }.add(library)
             }
         }
@@ -232,6 +215,7 @@ class CacheBuilder(
         val removedFiles = mutableListOf<LibraryFile>()
         val addedFiles = mutableListOf<LibraryFile>()
         val reversedPerFileDependencies = mutableMapOf<LibraryFile, MutableList<LibraryFile>>()
+        val reversedWeakPerFileDependencies = mutableMapOf<LibraryFile, MutableList<LibraryFile>>()
         val reversedWholeLibraryDependencies = mutableMapOf<KotlinLibrary, MutableList<LibraryFile>>()
         for (library in icedLibraries) {
             if (library in needFullRebuild) continue
@@ -276,8 +260,8 @@ class CacheBuilder(
                                 reversedWholeLibraryDependencies.getOrPut(dependentLibrary) { mutableListOf() }.add(libraryFile)
                             is DependenciesTracker.DependencyKind.CertainFiles ->
                                 kind.files.forEach { (name, weak) ->
-                                    if (!weak)
-                                        reversedPerFileDependencies.getOrPut(LibraryFile(dependentLibrary, name)) { mutableListOf() }.add(libraryFile)
+                                    (if (weak) reversedWeakPerFileDependencies else reversedPerFileDependencies)
+                                            .getOrPut(LibraryFile(dependentLibrary, name)) { mutableListOf() }.add(libraryFile)
                                 }
                         }
                     }
@@ -312,6 +296,11 @@ class CacheBuilder(
 
         removedFiles.forEach {
             if (it !in dirtyFiles) dfs(it)
+            // A weak dependency is link-time only, but the walk over cached dependencies still resolves it,
+            // so a file that weakly depends on a removed file must be rebuilt to drop the stale edge.
+            reversedWeakPerFileDependencies[it]?.forEach { weakDependent ->
+                if (weakDependent !in dirtyFiles) dfs(weakDependent)
+            }
         }
         changedFiles.forEach {
             if (it !in dirtyFiles) dfs(it)
@@ -371,7 +360,7 @@ class CacheBuilder(
     }
 
     private fun buildLibraryCache(library: KotlinLibrary, isExternal: Boolean, filesToCache: List<String>): List<Path> {
-        val dependencies = library.getAllTransitiveDependencies(uniqueNameToLibrary)
+        val dependencies = klibDag.getAllDependencies(library).toList()
         val dependencyCaches = dependencies.map {
             cacheRootDirectories[it] ?: run {
                 configuration.reportLog("SKIPPING ${library.path} as some of the dependencies aren't cached")
@@ -382,16 +371,17 @@ class CacheBuilder(
         configuration.reportLog("CACHING ${library.path}")
         filesToCache.forEach { configuration.reportLog("    $it") }
 
-        // Produce monolithic caches for external libraries for now, with the exception of the stdlib:
+        // Produce monolithic caches for external libraries for now, except debug stdlib:
         // its cache is per-file by default (see [NativeSecondStageCompilationConfig.perFileCacheForStdlib]),
         // so when it has to be rebuilt here it must match the per-file layout the distribution ships.
         val makePerFileCache = !library.isCInteropLibrary() &&
-                (!isExternal || (library.isNativeStdlib && config.perFileCacheForStdlib))
+                (!isExternal || (library.isNativeStdlib && config.perFileCacheForStdlib)) &&
+                !(library.isNativeStdlib && config.optimizationsEnabled)
 
         val libraryCacheDirectory = when {
             library.isImplicitlyLoadedFromKotlinNativeDistribution || library.isNativeStdlib -> config.systemCacheDirectory
             isExternal -> CachedLibraries.computeLibraryCacheDirectory(
-                    config.autoCacheDirectory, library, uniqueNameToLibrary, uniqueNameToHash)
+                    config.autoCacheDirectory, library, klibDag, uniqueNameToHash)
             else -> config.incrementalCacheDirectory!!
         }
         val libraryCache = libraryCacheDirectory.resolve(
@@ -548,9 +538,9 @@ class CacheBuilder(
             config.configuration.konanHome?.let {
                 this.konanHome = it
             }
-            val libraryPath = library.path.absolutePathString()
-            val libraries = dependencies.filter { it.isExplicitlySpecifiedByUserInCLIArgument }.map { it.path.absolutePathString() }
-            val cachedLibraries = dependencies.zip(dependencyCaches).associate { it.first.path.absolutePathString() to it.second }
+            val libraryPath = library.canonicalPath.pathString
+            val libraries = dependencies.map { it.canonicalPath.pathString }
+            val cachedLibraries = dependencies.zip(dependencyCaches).associate { it.first.canonicalPath.pathString to it.second }
             configuration.reportLog(
                     "-p static_cache -Xadd-cache=${library.path} \\\n" +
                             libraries.joinToString("\n") { "-library $it \\" } + "\n" +
@@ -569,7 +559,7 @@ class CacheBuilder(
             konanLibraries = libraries + libraryPath
             val generateTestRunner = this@CacheBuilder.generateTestRunner
             if (generateTestRunner != TestRunnerKind.NONE && libraryPath in this@CacheBuilder.includedLibraries) {
-                konanFriendLibraries = config.friendModuleFiles.map { it.absolutePathString() }
+                konanFriendLibraries = config.loadedKlibs.friends.map { it.canonicalPath.pathString }
                 this.generateTestRunner = generateTestRunner
                 konanIncludedLibraries = listOf(libraryPath)
                 configuration.testDumpOutputPath?.let { testDumpOutputPath = it }
@@ -581,6 +571,7 @@ class CacheBuilder(
                 cachedLibraryDependenciesFingerprint = computeDependenciesFingerprint(library).toString()
             if (filesToCache.isNotEmpty())
                 this.filesToCache = filesToCache
+            serializedKlibDag = klibDag.serialize() // Put the DAG of dependencies to compiler configuration to avoid re-computing it again.
         }
     }
 

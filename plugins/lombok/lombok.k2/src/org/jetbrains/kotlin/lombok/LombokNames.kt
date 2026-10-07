@@ -69,6 +69,9 @@ object LombokNames {
     val EQUALS_AND_HASH_CODE_INCLUDE_ID = EQUALS_AND_HASH_CODE_ID.createNestedClassId(INCLUDE_NAME)
     val EQUALS_AND_HASH_CODE_EXCLUDE_ID = EQUALS_AND_HASH_CODE_ID.createNestedClassId(EXCLUDE_NAME)
 
+    // Shared by `AccessorGenerator` (Data/Value's own `canEqual`) and `EqualsAndHashCodeGenerator`.
+    val CAN_EQUAL = Name.identifier("canEqual")
+
     //taken from idea lombok plugin
     val NON_NULL_ANNOTATIONS = listOf(
         "androidx.annotation.NonNull",
@@ -87,9 +90,18 @@ object LombokNames {
     ).map { FqName(it) }.toSet()
 
     val JAVA_OBJECT_ID = ClassId.fromString("java.lang/Object")
+    val JAVA_ARRAYS_ID = ClassId.fromString("java.util/Arrays")
     val JAVA_ITERABLE_ID = ClassId.fromString("java.lang/Iterable")
     val JAVA_COLLECTION_ID = ClassId.fromString("java.util/Collection")
     val JAVA_MAP_ID = ClassId.fromString("java.util/Map")
+    val JAVA_LIST_ID = ClassId.fromString("java.util/List")
+    val JAVA_SET_ID = ClassId.fromString("java.util/Set")
+    val JAVA_SORTED_SET_ID = ClassId.fromString("java.util/SortedSet")
+    val JAVA_NAVIGABLE_SET_ID = ClassId.fromString("java.util/NavigableSet")
+    val JAVA_SORTED_MAP_ID = ClassId.fromString("java.util/SortedMap")
+    val JAVA_NAVIGABLE_MAP_ID = ClassId.fromString("java.util/NavigableMap")
+    val JAVA_TREE_SET_ID = ClassId.fromString("java.util/TreeSet")
+    val JAVA_TREE_MAP_ID = ClassId.fromString("java.util/TreeMap")
 
     val IMMUTABLE_COLLECTION_ID = "ImmutableCollection".guavaCollectType()
     val IMMUTABLE_LIST_ID = "ImmutableList".guavaCollectType()
@@ -115,10 +127,10 @@ object LombokNames {
         // Java collections
         JAVA_ITERABLE_ID,
         JAVA_COLLECTION_ID,
-        ClassId.fromString("java.util/List"),
-        ClassId.fromString("java.util/Set"),
-        ClassId.fromString("java.util/SortedSet"),
-        ClassId.fromString("java.util/NavigableSet"),
+        JAVA_LIST_ID,
+        JAVA_SET_ID,
+        JAVA_SORTED_SET_ID,
+        JAVA_NAVIGABLE_SET_ID,
 
         // Kotlin collections
         StandardClassIds.Iterable,
@@ -136,8 +148,8 @@ object LombokNames {
     val SUPPORTED_MAP_IDS = setOf(
         // Java maps
         JAVA_MAP_ID,
-        ClassId.fromString("java.util/SortedMap"),
-        ClassId.fromString("java.util/NavigableMap"),
+        JAVA_SORTED_MAP_ID,
+        JAVA_NAVIGABLE_MAP_ID,
 
         // Kotlin maps
         StandardClassIds.Map,

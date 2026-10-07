@@ -7,13 +7,15 @@ package org.jetbrains.kotlin.backend.konan.lower
 
 import org.jetbrains.kotlin.backend.common.*
 import org.jetbrains.kotlin.backend.common.lower.*
+import org.jetbrains.kotlin.backend.common.lower.inline.LocalClassesInInlineLambdasLowering
+import org.jetbrains.kotlin.backend.common.phaser.PhasePrerequisites
+import org.jetbrains.kotlin.backend.common.serialization.kotlinLibrary
 import org.jetbrains.kotlin.backend.konan.*
 import org.jetbrains.kotlin.backend.konan.cgen.*
 import org.jetbrains.kotlin.backend.konan.descriptors.synthesizedName
 import org.jetbrains.kotlin.backend.konan.ir.*
 import org.jetbrains.kotlin.backend.konan.IntrinsicType
 import org.jetbrains.kotlin.backend.konan.ir.tryGetIntrinsicType
-import org.jetbrains.kotlin.backend.konan.serialization.isFromCInteropLibrary
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
@@ -36,21 +38,23 @@ import org.jetbrains.kotlin.ir.util.isSubtypeOf
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.konan.ForeignExceptionMode
 import org.jetbrains.kotlin.library.KotlinLibrary
+import org.jetbrains.kotlin.library.metadata.isCInteropLibrary
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.NativeStandardInteropNames.objCActionClassId
 import org.jetbrains.kotlin.native.interop.ObjCMethodInfo
 
-internal class InteropLowering(val context: NativeBackendContext, val fileLowerState: FileLowerState) : FileLoweringPass, BodyLoweringPass {
+@PhasePrerequisites(LocalClassesInInlineLambdasLowering::class)
+internal class InteropLowering(val generationState: NativeGenerationState) : FileLoweringPass, BodyLoweringPass {
     override fun lower(irFile: IrFile) {
         // TODO: merge these lowerings.
-        InteropLoweringPart1(context, fileLowerState).lower(irFile)
-        InteropLoweringPart2(context, fileLowerState).lower(irFile)
+        InteropLoweringPart1(generationState, generationState.fileLowerState).lower(irFile)
+        InteropLoweringPart2(generationState, generationState.fileLowerState).lower(irFile)
     }
 
     override fun lower(irBody: IrBody, container: IrDeclaration) {
-        InteropLoweringPart1(context, fileLowerState).lower(irBody, container)
-        InteropLoweringPart2(context, fileLowerState).lower(irBody, container)
+        InteropLoweringPart1(generationState, generationState.fileLowerState).lower(irBody, container)
+        InteropLoweringPart2(generationState, generationState.fileLowerState).lower(irBody, container)
     }
 
     companion object {
@@ -76,7 +80,7 @@ private class NameCounter {
 }
 
 private abstract class BaseInteropIrTransformer(
-        protected val context: NativeBackendContext,
+        protected val context: NativeLoweringContext,
         protected val fileLowerState: FileLowerState,
         protected val irFile: IrFile?,
 ) : IrBuildingTransformer(context) {
@@ -131,7 +135,7 @@ private abstract class BaseInteropIrTransformer(
             override val typeSystem: IrTypeSystemContext get() = context.typeSystem
 
             val klib: KotlinLibrary? get() {
-                return (element as? IrCall)?.symbol?.owner?.konanLibrary
+                return (element as? IrCall)?.symbol?.owner?.moduleFragment?.kotlinLibrary
             }
 
             override val language: String
@@ -166,7 +170,7 @@ private abstract class BaseInteropIrTransformer(
             renderCompilerError(irFile, element, message)
 }
 
-private class InteropLoweringPart1(val context: NativeBackendContext, val fileLowerState: FileLowerState) : FileLoweringPass, BodyLoweringPass {
+private class InteropLoweringPart1(val context: NativeLoweringContext, val fileLowerState: FileLowerState) : FileLoweringPass, BodyLoweringPass {
     private var topLevelInitializersCounter = 0
 
     override fun lower(irFile: IrFile) {
@@ -210,7 +214,7 @@ private class InteropLoweringPart1(val context: NativeBackendContext, val fileLo
 }
 
 private class InteropTransformerPart1(
-        context: NativeBackendContext,
+        context: NativeLoweringContext,
         fileLowerState: FileLowerState,
         irFile: IrFile?,
 ) : BaseInteropIrTransformer(context, fileLowerState, irFile) {
@@ -487,7 +491,7 @@ private class InteropTransformerPart1(
 
         builder.at(expression)
 
-        val constructedClass = outerClasses.peek()!!
+        val constructedClass = outerClasses.peek() ?: return expression
 
         if (!constructedClass.isObjCClass()) {
             return expression
@@ -723,7 +727,7 @@ private class InteropTransformerPart1(
 /**
  * Lowers some interop intrinsic calls.
  */
-private class InteropLoweringPart2(val context: NativeBackendContext, val fileLowerState: FileLowerState) : FileLoweringPass, BodyLoweringPass {
+private class InteropLoweringPart2(val context: NativeLoweringContext, val fileLowerState: FileLowerState) : FileLoweringPass, BodyLoweringPass {
     override fun lower(irFile: IrFile) {
         val transformer = InteropTransformerPart2(context, fileLowerState, irFile)
         irFile.transformChildrenVoid(transformer)
@@ -736,7 +740,7 @@ private class InteropLoweringPart2(val context: NativeBackendContext, val fileLo
 }
 
 private class InteropTransformerPart2(
-        context: NativeBackendContext,
+        context: NativeLoweringContext,
         fileLowerState: FileLowerState,
         irFile: IrFile?,
 ) : BaseInteropIrTransformer(context, fileLowerState, irFile) {
@@ -815,7 +819,7 @@ private class InteropTransformerPart2(
     private fun tryGenerateInteropConstantRead(expression: IrCall): IrExpression? {
         val function = expression.symbol.owner
 
-        if (!function.isFromCInteropLibrary()) return null
+        if (function.moduleFragment.kotlinLibrary?.isCInteropLibrary() != true) return null
         if (!function.isGetter) return null
 
         val constantProperty = function.correspondingPropertySymbol?.owner?.takeIf { it.isConst } ?: return null
@@ -831,7 +835,7 @@ private class InteropTransformerPart2(
         val function = expression.symbol.owner
 
         val exceptionMode = ForeignExceptionMode.byValue(
-                function.konanLibrary?.manifestProperties?.getProperty(ForeignExceptionMode.manifestKey)
+                function.moduleFragment.kotlinLibrary?.manifestProperties?.getProperty(ForeignExceptionMode.manifestKey)
         )
         return builder.generateExpressionWithStubs(expression) {
             generateCCall(
@@ -848,7 +852,7 @@ private class InteropTransformerPart2(
         val function = expression.symbol.owner
 
         val exceptionMode = ForeignExceptionMode.byValue(
-                function.konanLibrary?.manifestProperties?.getProperty(ForeignExceptionMode.manifestKey)
+                function.moduleFragment.kotlinLibrary?.manifestProperties?.getProperty(ForeignExceptionMode.manifestKey)
         )
         return builder.generateExpressionWithStubs(expression) {
             generateCGlobalDirectAccess(expression, builder, exceptionMode)

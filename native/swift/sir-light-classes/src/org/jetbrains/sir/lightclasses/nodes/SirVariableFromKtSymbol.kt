@@ -31,6 +31,7 @@ import org.jetbrains.kotlin.sir.providers.withSessions
 import org.jetbrains.kotlin.sir.util.SirSwiftModule
 import org.jetbrains.kotlin.sir.util.isUnavailable
 import org.jetbrains.kotlin.sir.util.swiftFqName
+import org.jetbrains.kotlin.sir.util.swiftIdentifier
 import org.jetbrains.kotlin.sir.util.unavailableTypes
 import org.jetbrains.kotlin.sir.util.replaceOrAddPropagatedUnavailability
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
@@ -230,7 +231,7 @@ internal abstract class SirAbstractGetter(
         val variable = variable
         val propName = variable?.kotlinPropertyName
         buildList {
-            addAll(proxy.createSirBridges(forwardCall))
+            addAll(proxy.createSirBridges(nonVirtualTargetMethod = null, forwardCall))
 
             if (variable != null && propName != null && !isUnavailable) {
                 if (variable.accessorNeedsNonVirtualForwardBridge() && !variable.isAbstractKotlinProperty) {
@@ -238,7 +239,7 @@ internal abstract class SirAbstractGetter(
                 }
                 if (variable.accessorNeedsReverseBridge()) {
                     val tryPrefix = if (errorType != SirType.never) "try " else ""
-                    val swiftName = variable.name
+                    val swiftName = variable.name.swiftIdentifier
                     addAll(
                         proxy.createReverseSirBridges(
                             targetClassFqName = variable.reverseBridgeTargetClassFqName(),
@@ -337,14 +338,14 @@ internal abstract class SirAbstractSetter(
         val variable = variable
         val propName = variable?.kotlinPropertyName
         buildList {
-            addAll(proxy.createSirBridges(forwardCall))
+            addAll(proxy.createSirBridges(nonVirtualTargetMethod = null, forwardCall))
 
             if (variable != null && propName != null && !isUnavailable) {
                 if (variable.accessorNeedsNonVirtualForwardBridge() && !variable.isAbstractKotlinProperty) {
                     add(proxy.createDirectDispatchForwardBridge("<set-$propName>", forwardCall))
                 }
                 if (variable.accessorNeedsReverseBridge()) {
-                    val swiftName = variable.name
+                    val swiftName = variable.name.swiftIdentifier
                     addAll(
                         proxy.createReverseSirBridges(
                             targetClassFqName = variable.reverseBridgeTargetClassFqName(),

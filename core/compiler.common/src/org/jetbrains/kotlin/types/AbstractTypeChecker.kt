@@ -76,6 +76,12 @@ open class TypeCheckerState(
         isFromNullabilityConstraint: Boolean = false
     ): Boolean? = null
 
+    open fun runForEquality(
+        a: KotlinTypeMarker,
+        b: KotlinTypeMarker,
+        block: () -> Boolean,
+    ): Boolean = block()
+
     // Handling cases like A<Int> & A<T> <: A<F_var>
     // There are two possible solutions for F_var (Int and T) and both of them may work well or not with other constrains
     // Effectively, we need to fork constraint system to two copies: one with F_var=Int and the other with F_var=T
@@ -277,10 +283,8 @@ object AbstractTypeChecker {
 
         state.customIsSubtypeOf(subType, superType)?.let { return it }
 
-        return with(state) {
-            with(state.typeSystemContext) {
-                completeIsSubTypeOf(subType, superType, isFromNullabilityConstraint)
-            }
+        return context(state, state.typeSystemContext) {
+            completeIsSubTypeOf(subType, superType, isFromNullabilityConstraint)
         }
     }
 
@@ -300,7 +304,9 @@ object AbstractTypeChecker {
                 }
             }
 
-            return isSubtypeOf(state, a, b) && isSubtypeOf(state, b, a)
+            return state.runForEquality(a, b) {
+                isSubtypeOf(state, a, b) && isSubtypeOf(state, b, a)
+            }
         }
 
 
@@ -423,10 +429,24 @@ object AbstractTypeChecker {
         val superConstructor = superType.typeConstructor()
 
         if (c.areEqualTypeConstructors(subType.typeConstructor(), superConstructor) && superConstructor.parametersCount() == 0) return true
-        if (superType.typeConstructor().isAnyConstructor()) return true
+        if (superConstructor.isAnyConstructor()) return true
+
+        if (superConstructor.isNonErrorConstructor()) {
+            return state.anySupertype(
+                subType,
+                supertypesPolicy = { LowerIfFlexible },
+                predicate = {
+                    val typeConstructor = it.typeConstructor()
+                    typeConstructor.isClassTypeConstructor() &&
+                            !typeConstructor.isAnyConstructor() &&
+                            !typeConstructor.isRichErrorConstructor() &&
+                            !typeConstructor.isRichErrorClass()
+                }
+            )
+        }
 
         val supertypesWithSameConstructor = filterOutEquivalentSupertypesWithSameConstructor(
-            findCorrespondingSupertypes(state, subType, superConstructor)
+            findCorrespondingSupertypes(subType, superConstructor)
         )
 
         when (supertypesWithSameConstructor.size) {
@@ -664,13 +684,36 @@ object AbstractTypeChecker {
             return superTypeConstructor.supertypes().all { isSubtypeOf(state, subType, it) }
         }
 
+        val subTypeConstructor = subType.typeConstructor()
+
+        if (subTypeConstructor.isUnion()) {
+            return isSubtypeOf(state, subTypeConstructor.getPrimaryTypeOfUnion()!!, superType) &&
+                    subTypeConstructor.getRichErrorsOfUnion().all { isSubtypeOf(state, it, superType) }
+        }
+
+        // subType can't be a union type here because it's handled above.
+        if (superTypeConstructor.isUnion()) {
+            val superTypePrimaryType = superTypeConstructor.getPrimaryTypeOfUnion()!!
+
+            // TODO(KT-89099): if we decide to normalize nullable rich error types before subtyping
+            if (!AbstractNullabilityChecker.isSubtypeOfAny(state, subType)) {
+                if (AbstractNullabilityChecker.isSubtypeOfAny(state, superTypePrimaryType)) return false
+
+                val notNullSubType = subType.makeDefinitelyNotNullOrNotNull()
+                return isSubtypeOf(state, notNullSubType, superTypePrimaryType) ||
+                        superTypeConstructor.getRichErrorsOfUnion().any { isSubtypeOf(state, notNullSubType, it) }
+            }
+
+            return isSubtypeOf(state, subType, superTypePrimaryType) ||
+                    superTypeConstructor.getRichErrorsOfUnion().any { isSubtypeOf(state, subType, it) }
+        }
+
         /*
          * We handle cases like CapturedType(out Bar) <: Foo<CapturedType(out Bar)> separately here.
          * If Foo is a self type i.g. Foo<E: Foo<E>>, then argument for E will certainly be subtype of Foo<same_argument_for_E>,
          * so if CapturedType(out Bar) is the same as a type of Foo's argument and Foo is a self type, then subtyping should return true.
          * If we don't handle this case separately, subtyping may not converge due to the nature of the capturing.
          */
-        val subTypeConstructor = subType.typeConstructor()
         if (subType is CapturedTypeMarker
             || (subTypeConstructor.isIntersection() && subTypeConstructor.supertypes().all { it is CapturedTypeMarker })
         ) {

@@ -1,12 +1,11 @@
 import com.github.gradle.node.npm.task.NpmTask
+import org.gradle.kotlin.dsl.support.serviceOf
 import org.gradle.internal.os.OperatingSystem
-import org.jetbrains.kotlin.testFederation.SmokeTestConfig
-import org.jetbrains.kotlin.testFederation.smokeTestConfig
+import org.jetbrains.kotlin.testFederation.testFederation
 import java.util.*
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("jvm")
     alias(libs.plugins.gradle.node)
@@ -14,7 +13,6 @@ plugins {
     id("binaryen-configuration")
     id("nodejs-configuration")
     id("java-test-fixtures")
-    id("project-tests-convention")
     id("test-inputs-check")
     id("wasmtime-configuration")
 }
@@ -248,7 +246,7 @@ sourceSets {
 optInToK1Deprecation()
 fun Test.setupGradlePropertiesForwarding() {
     val rootLocalProperties = Properties().apply {
-        rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use {
+        File(rootDir,"local.properties").takeIf { it.isFile }?.inputStream()?.use {
             load(it)
         }
     }
@@ -307,6 +305,19 @@ val createJscRunner = tasks.register<CreateJscRunner>("createJscRunner") {
     inputDirectory.set(unzipJsc.flatMap { it.into })
 }
 
+val maybeCleanWasmTestOutputTask = tasks.register<Delete>("maybeCleanWasmTestOutput") {
+    description = "Clean the Wasm test output directory if needed"
+    delete(layout.buildDirectory.dir("out"))
+
+    // see <repo-root>/gradle.properties which documents the possible values of fd.kotlin.wasm.debugMode, and fd.kotlin.wasm.neverCleanTestOutput
+    val debugMode = kotlinBuildProperties.stringProperty("fd.kotlin.wasm.debugMode").map { it !in listOf("none", "false", "0") }
+    val neverCleanTestOutput = kotlinBuildProperties.booleanProperty("fd.kotlin.wasm.neverCleanTestOutput")
+
+    onlyIf("Only clean test output directory, if we're NOT in debug mode, and neverCleanTestOutput has NOT been specified") {
+        !debugMode.getOrElse(false) && !neverCleanTestOutput.getOrElse(false)
+    }
+}
+
 fun Test.setupSpiderMonkey() {
     val jsShellExecutablePath = unzipJsShell
         .map { it.destinationDir }
@@ -338,9 +349,13 @@ fun Test.setupJsc() {
         classpath.from(jscRunnerExecutablePath)
         property.set("javascript.engine.path.JavaScriptCore")
     }
+
+    systemProperty(
+        "javascript.engine.JavaScriptCore.EnableOnWindows",
+        kotlinBuildProperties.booleanProperty("kotlin.enable.tests.jsc.on.windows").get()
+    )
 }
 
-testsJar {}
 
 projectTests {
     testGenerator(
@@ -358,22 +373,24 @@ projectTests {
             taskName = taskName,
             skipInLocalBuild = skipInLocalBuild,
             enableGroupingTestEngine = true,
-            maxHeapSizeMb = 6144
+            maxHeapSize = testMaxHeapSizeLarge,
         ) {
-            with(d8KotlinBuild) {
-                setupV8()
+            val buildFeatures = project.serviceOf<BuildFeatures>()
+            if (!buildFeatures.isolatedProjects.active.get()) {
+                with(d8KotlinBuild) {
+                    setupV8()
+                }
+                with(wasmNodeJsKotlinBuild) {
+                    setupNodeJs(nodejsVersion)
+                    dependsOn(":js:js.tests:npmInstall")
+                }
+                // it is necessary for TypeScript tests
+                with(nodeJsKotlinBuild) {
+                    setupNodeJs(nodejsVersion)
+                }
             }
             with(wasmtimeKotlinBuild) {
                 setupWasmtime()
-            }
-            with(wasmNodeJsKotlinBuild) {
-                setupNodeJs(nodejsVersion)
-                dependsOn(":js:js.tests:npmInstall")
-            }
-            // it is necessary for TypeScript tests
-            with(nodeJsKotlinBuild) {
-                setupNodeJs(nodejsVersion)
-                dependsOn(":js:js.tests:npmInstall")
             }
             with(binaryenKotlinBuild) {
                 setupBinaryen()
@@ -390,6 +407,8 @@ projectTests {
             addAbsoluteDirectoryProperty(node.nodeProjectDir, "kotlin.wasm.test.node.dir")
             body()
             dependsOn(npmInstall)
+
+            finalizedBy(maybeCleanWasmTestOutputTask)
         }
     }
 
@@ -408,7 +427,11 @@ projectTests {
 
     // Test everything, intended to use locally
     wasmProjectTest("test", skipInLocalBuild = false) {
-        smokeTestConfig = SmokeTestConfig.Enabled(autoSmokeTestPercentage = 1)
+        testFederation {
+            smokeTests {
+                includeAutoSamples(percentage = 1)
+            }
+        }
     }
 
     // The nine tasks below split the content of the `test` task into disjoint groups.
@@ -416,6 +439,9 @@ projectTests {
     // The `wasmFirCompilerExtraTest` task is excluded from aggregate `wasmFirCompilerTest` task.
     wasmProjectTest("wasmFirCompilerExtraTest", tags = extraTag)
     wasmProjectTest("wasmJsBoxTest", tags = jsBoxTag)
+    wasmProjectTest("wasmJsBoxWithJscOnWindows", tags = jsBoxTag) {
+        systemProperty("javascript.engine.JavaScriptCore.EnableOnWindows", "true")
+    }
     wasmProjectTest("wasmJsSplittingTest", tags = jsSplittingTag)
     wasmProjectTest("wasmJsMultiModuleTest", tags = jsMultiModuleTag)
     wasmProjectTest("wasmWasiBoxTest", tags = wasiBoxTag)
@@ -437,6 +463,7 @@ projectTests {
     testData(project(":js:js.translator").isolated, "testData/typescript-export/wasm/")
 
     withWasmRuntime()
+    withStdlibCommon()
 }
 
 tasks.processTestFixturesResources.configure {

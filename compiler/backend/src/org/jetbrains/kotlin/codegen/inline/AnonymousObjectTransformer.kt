@@ -11,7 +11,6 @@ import org.jetbrains.kotlin.codegen.coroutines.DEBUG_METADATA_ANNOTATION_ASM_TYP
 import org.jetbrains.kotlin.codegen.coroutines.isCoroutineSuperClass
 import org.jetbrains.kotlin.codegen.inline.coroutines.CoroutineTransformer
 import org.jetbrains.kotlin.codegen.inline.coroutines.FOR_INLINE_SUFFIX
-import org.jetbrains.kotlin.config.JVMConfigurationKeys
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.load.java.JvmAnnotationNames
 import org.jetbrains.kotlin.load.kotlin.FileBasedKotlinClass
@@ -47,6 +46,7 @@ class AnonymousObjectTransformer(
         val innerClassNodes = ArrayList<InnerClassNode>()
         val classBuilder = createRemappingClassBuilderViaFactory(inliningContext)
         val methodsToTransform = ArrayList<MethodNode>()
+        val fieldsToTransform = ArrayList<FieldNode>()
         val metadataReader = ReadKotlinClassHeaderAnnotationVisitor()
         lateinit var superClassName: String
         var debugFileName: String? = null
@@ -107,11 +107,8 @@ class AnonymousObjectTransformer(
 
             override fun visitField(access: Int, name: String, desc: String, signature: String?, value: Any?): FieldVisitor? {
                 addUniqueField(name)
-                return if (isCapturedFieldName(name)) {
-                    null
-                } else {
-                    classBuilder.newField(null, access, name, desc, signature, value)
-                }
+                if (isCapturedFieldName(name)) return null
+                return FieldNode(access, name, desc, signature, value).also { fieldsToTransform.add(it) }
             }
 
             override fun visitSource(source: String, debug: String?) {
@@ -170,17 +167,19 @@ class AnonymousObjectTransformer(
                 rewriteAssertionsDisabledFieldInitialization(next, inliningContext.root.callSiteInfo.ownerClassName)
             }
 
-            val funResult = inlineMethodAndUpdateGlobalResult(parentRemapper, deferringVisitor, next, allCapturedParamBuilder, false)
-
-            val returnType = Type.getReturnType(next.desc)
-            if (!AsmUtil.isPrimitive(returnType)) {
-                val oldFunReturnType = returnType.internalName
-                val newFunReturnType = funResult.getChangedTypes()[oldFunReturnType]
-                if (newFunReturnType != null) {
-                    inliningContext.typeRemapper.addAdditionalMappings(oldFunReturnType, newFunReturnType)
-                }
-            }
+            inlineMethodAndUpdateGlobalResult(parentRemapper, deferringVisitor, next, allCapturedParamBuilder, false)
             deferringMethods.add(deferringVisitor)
+        }
+
+        for ([oldType, newType] in transformationResult.getChangedTypes()) {
+            inliningContext.typeRemapper.addAdditionalMappings(oldType, newType)
+        }
+
+        for (field in fieldsToTransform) {
+            field.accept(object : ClassVisitor(Opcodes.API_VERSION) {
+                override fun visitField(access: Int, name: String, desc: String, signature: String?, value: Any?) =
+                    classBuilder.newField(null, access, name, desc, signature, value)
+            })
         }
 
         deferringMethods.forEach { method ->
@@ -320,11 +319,10 @@ class AnonymousObjectTransformer(
         next: MethodNode,
         allCapturedParamBuilder: ParametersBuilder,
         isConstructor: Boolean
-    ): InlineResult {
+    ) {
         val funResult = inlineMethod(parentRemapper, deferringVisitor, next, allCapturedParamBuilder, isConstructor)
         transformationResult.merge(funResult)
         transformationResult.reifiedTypeParametersUsages.mergeAll(funResult.reifiedTypeParametersUsages)
-        return funResult
     }
 
     private fun inlineMethod(
@@ -349,7 +347,7 @@ class AnonymousObjectTransformer(
                 null
             }
         val inlineScopesGenerator =
-            if (state.configuration.getBoolean(JVMConfigurationKeys.USE_INLINE_SCOPES_NUMBERS)) {
+            if (state.config.useInlineScopesNumbers) {
                 InlineScopesGenerator()
             } else {
                 null

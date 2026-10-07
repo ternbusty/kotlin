@@ -87,6 +87,12 @@ public class AtomicfuNativeKlibSyntheticAccessorTestGenerated extends AbstractAt
     }
 
     @Test
+    @TestMetadata("InlineExtensionProperties.kt")
+    public void testInlineExtensionProperties() {
+      run("InlineExtensionProperties.kt");
+    }
+
+    @Test
     @TestMetadata("InlineExtensionWithTypeParameterTest.kt")
     public void testInlineExtensionWithTypeParameterTest() {
       run("InlineExtensionWithTypeParameterTest.kt");
@@ -291,6 +297,12 @@ public class AtomicfuNativeKlibSyntheticAccessorTestGenerated extends AbstractAt
     public void testDelegatedCompanionProperties() {
       run("DelegatedCompanionProperties.kt");
     }
+
+    @Test
+    @TestMetadata("InlineExtensionProperties.kt")
+    public void testInlineExtensionProperties() {
+      run("InlineExtensionProperties.kt");
+    }
   }
 
   @Nested
@@ -402,6 +414,12 @@ public class AtomicfuNativeKlibSyntheticAccessorTestGenerated extends AbstractAt
     @TestMetadata("FieldInObjectTest.kt")
     public void testFieldInObjectTest() {
       run("FieldInObjectTest.kt");
+    }
+
+    @Test
+    @TestMetadata("InvokeLoopFromInlineFun.kt")
+    public void testInvokeLoopFromInlineFun() {
+      run("InvokeLoopFromInlineFun.kt");
     }
 
     @Test

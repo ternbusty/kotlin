@@ -25,6 +25,14 @@ internal class ClassF : SealedInterfaceA
 
 internal class ClassG : SealedClassA()
 
+enum class EnumClassA : SealedInterfaceA {
+    ONE, TWO, THREE
+}
+
+enum class EnumClassB : InterfaceC {
+    FOUR, FIVE, SIX
+}
+
 // FILE: deprecation.kt
 package org.kotlin.foo
 
@@ -93,6 +101,18 @@ package org.kotlin.foo
 sealed interface QueryResult<T> {
     class Value<T>(val value: T) : QueryResult<T>
     class AsyncValue<T>(val value: T) : QueryResult<T>
+}
+
+// FILE: internal_container.kt
+package org.kotlin.foo
+
+// KT-89701: `Builder` is public, but its internal container is not exported, so neither is `Builder`.
+sealed interface SealedInterfaceWithContainedInheritor
+
+class ExportedContainedInheritor : SealedInterfaceWithContainedInheritor
+
+internal class InternalContainer {
+    class Builder : SealedInterfaceWithContainedInheritor
 }
 
 // FIXME: platform test are not supported right now, enable in KT-86819

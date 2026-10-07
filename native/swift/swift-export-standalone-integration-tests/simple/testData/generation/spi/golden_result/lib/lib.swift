@@ -72,13 +72,13 @@ public final class ExperimentalLibClass: KotlinRuntime.KotlinBase {
         }
     }
     @_spi(ExperimentalLibApi)
-    public init() {
+    public override init() {
         let __kt = __root___ExperimentalLibClass_init_allocate()
         super.init(__externalRCRefUnsafe: __kt, options: .asBoundBridge);
         { __root___ExperimentalLibClass_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(__kt); return () }()
     }
     package override init(
-        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer?,
+        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer,
         options: KotlinRuntime.KotlinBaseConstructionOptions
     ) {
         super.init(__externalRCRefUnsafe: __externalRCRefUnsafe, options: options);
@@ -91,20 +91,25 @@ public final class ExperimentalLibClass: KotlinRuntime.KotlinBase {
 @_spi(OpenClassOptIn)
 open class OpenClass: KotlinRuntime.KotlinBase {
     @_spi(OpenClassOptIn)
-    public init() {
-        let __kt = __root___OpenClass_init_allocate()
+    public override init() {
+         let __kt: Swift.UnsafeMutableRawPointer!
+         if Self.self == lib.OpenClass.self {
+             __kt = __root___OpenClass_init_allocate()
+         } else {
+             __kt = _kotlinAllocInstanceForSwiftSubclass(Self.self)
+         }
         super.init(__externalRCRefUnsafe: __kt, options: .asBoundBridge);
         { __root___OpenClass_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(__kt); return () }()
     }
     package override init(
-        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer?,
+        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer,
         options: KotlinRuntime.KotlinBaseConstructionOptions
     ) {
         super.init(__externalRCRefUnsafe: __externalRCRefUnsafe, options: options);
     }
 }
 public final class RegularLibClass: KotlinRuntime.KotlinBase {
-    public init() {
+    public override init() {
         let __kt = __root___RegularLibClass_init_allocate()
         super.init(__externalRCRefUnsafe: __kt, options: .asBoundBridge);
         { __root___RegularLibClass_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(__kt); return () }()
@@ -118,7 +123,7 @@ public final class RegularLibClass: KotlinRuntime.KotlinBase {
         { __root___RegularLibClass_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer_Swift_String__(__kt, a); return () }()
     }
     package override init(
-        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer?,
+        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer,
         options: KotlinRuntime.KotlinBaseConstructionOptions
     ) {
         super.init(__externalRCRefUnsafe: __externalRCRefUnsafe, options: options);
@@ -236,6 +241,23 @@ extension lib.InterfaceOne {
 extension lib.InterfaceTwo where Self : lib.__InterfaceTwo {
 }
 extension lib.InterfaceTwo {
+}
+extension lib.InternalLibInterface {
+    @_spi(InternalLibApi)
+    public var genericProperty: Swift.String {
+        @_spi(InternalLibApi)
+        get {
+            let receiver = self
+            return lib.getGenericProperty(receiver)
+        }
+    }
+}
+extension lib.InternalLibInterface {
+    @_spi(ExperimentalLibApi) @_spi(InternalLibApi)
+    public func fooB() -> lib.ExperimentalLibClass {
+        let receiver = self
+        return lib.fooB(receiver)
+    }
 }
 @_documentation(visibility: internal)
 extension lib.InternalLibInterface where Self : lib.__InternalLibInterface {

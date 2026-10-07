@@ -42,7 +42,7 @@ class KaptEnvironmentConfigurator(
         testServices.kaptOptionsProvider.registerKaptOptions(module) {
             val temporaryDirectoryManager = testServices.temporaryDirectoryManager
             projectBaseDir = temporaryDirectoryManager.rootDir
-            compileClasspath.addAll(PathUtil.getJdkClassesRootsFromCurrentJre() + PathUtil.kotlinPathsForIdeaPlugin.stdlibPath)
+            compileClasspath.addAll(PathUtil.getJdkClassesRootsFromCurrentJre() + PathUtil.kotlinPathsForDistDirectory.stdlibPath)
 
             sourcesOutputDir = temporaryDirectoryManager.getOrCreateTempDirectory(KAPT_RUNNER_DIRECTORY_NAME)
             classesOutputDir = sourcesOutputDir
@@ -79,7 +79,6 @@ class KaptEnvironmentConfigurator(
 
         val runtimeLibrary = PathUtil.getResourcePathForClass(KaptIgnored::class.java)
         configuration.addJvmClasspathRoot(runtimeLibrary)
-        configuration.put(JVMConfigurationKeys.DO_NOT_CLEAR_BINDING_CONTEXT, true)
 
         configuration.put(JVMConfigurationKeys.SKIP_BODIES, true)
         if (testServices.defaultsProvider.frontendKind == FrontendKinds.FIR) {

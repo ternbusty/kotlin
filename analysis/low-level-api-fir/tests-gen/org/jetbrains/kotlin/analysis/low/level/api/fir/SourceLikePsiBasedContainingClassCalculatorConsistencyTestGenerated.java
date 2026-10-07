@@ -47,6 +47,12 @@ public class SourceLikePsiBasedContainingClassCalculatorConsistencyTestGenerated
   }
 
   @Test
+  @TestMetadata("codeFragmentWithCompilerPlugin.kt")
+  public void testCodeFragmentWithCompilerPlugin() {
+    run("codeFragmentWithCompilerPlugin.kt");
+  }
+
+  @Test
   @TestMetadata("companionBlocks.kt")
   public void testCompanionBlocks() {
     run("companionBlocks.kt");
@@ -113,6 +119,18 @@ public class SourceLikePsiBasedContainingClassCalculatorConsistencyTestGenerated
   }
 
   @Test
+  @TestMetadata("fullValueClass.kt")
+  public void testFullValueClass() {
+    run("fullValueClass.kt");
+  }
+
+  @Test
+  @TestMetadata("fullValueObject.kt")
+  public void testFullValueObject() {
+    run("fullValueObject.kt");
+  }
+
+  @Test
   @TestMetadata("genericClass.kt")
   public void testGenericClass() {
     run("genericClass.kt");
@@ -152,6 +170,12 @@ public class SourceLikePsiBasedContainingClassCalculatorConsistencyTestGenerated
   @TestMetadata("localClass.kt")
   public void testLocalClass() {
     run("localClass.kt");
+  }
+
+  @Test
+  @TestMetadata("localClassWithCompilerPlugin.kt")
+  public void testLocalClassWithCompilerPlugin() {
+    run("localClassWithCompilerPlugin.kt");
   }
 
   @Test

@@ -5,8 +5,17 @@
 
 package org.jetbrains.kotlin.psi;
 
+import kotlin.DeprecationLevel;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * A convenience {@link KtVisitor} for the common case of a visitor that returns nothing and needs no extra data.
+ *
+ * <p>It exposes single-argument {@code visit*} methods (without the result and data parameters), so subclasses can override, for example,
+ * {@code visitProperty(KtProperty)} instead of {@code visitProperty(KtProperty, Void)}.
+ *
+ * @see KtTreeVisitorVoid
+ */
 public class KtVisitorVoid extends KtVisitor<Void, Void> {
     // methods with void return
 
@@ -144,7 +153,7 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
     }
 
     /**
-     * Must not be overriden at the same time as {@link #visitContextParameterList(KtContextParameterList)}.
+     * Must not be overridden at the same time as {@link #visitContextParameterList(KtContextParameterList)}.
      *
      * @see KtVisitor#visitContextReceiverList(KtContextReceiverList, Object)
      */
@@ -308,6 +317,11 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
         super.visitSafeQualifiedExpression(expression, null);
     }
 
+    @KtExperimentalApi
+    public void visitErrorSafeQualifiedExpression(@NotNull KtErrorSafeQualifiedExpression expression) {
+        super.visitErrorSafeQualifiedExpression(expression, null);
+    }
+
     public void visitObjectLiteralExpression(@NotNull KtObjectLiteralExpression expression) {
         super.visitObjectLiteralExpression(expression, null);
     }
@@ -384,7 +398,8 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
      * @deprecated This method is obsolete because {@link KtSelfType} is obsolete.
      */
     @kotlin.Deprecated(
-            message = "This method is obsolete because 'KtSelfType' is obsolete."
+            message = "This method is obsolete because 'KtSelfType' is obsolete.",
+            level = DeprecationLevel.ERROR
     )
     @Deprecated
     public void visitSelfType(@NotNull KtSelfType type) {
@@ -409,6 +424,11 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
 
     public void visitIntersectionType(@NotNull KtIntersectionType intersectionType) {
         super.visitIntersectionType(intersectionType, null);
+    }
+
+    @KtExperimentalApi
+    public void visitUnionType(@NotNull KtUnionType unionType) {
+        super.visitUnionType(unionType, null);
     }
 
     public void visitTypeProjection(@NotNull KtTypeProjection typeProjection) {
@@ -903,6 +923,13 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
         return null;
     }
 
+    @KtExperimentalApi
+    @Override
+    public Void visitErrorSafeQualifiedExpression(@NotNull KtErrorSafeQualifiedExpression expression, Void data) {
+        visitErrorSafeQualifiedExpression(expression);
+        return null;
+    }
+
     @Override
     public final Void visitObjectLiteralExpression(@NotNull KtObjectLiteralExpression expression, Void data) {
         visitObjectLiteralExpression(expression);
@@ -1003,7 +1030,8 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
      * @deprecated This method is obsolete because {@link KtSelfType} is obsolete.
      */
     @kotlin.Deprecated(
-            message = "This method is obsolete because 'KtSelfType' is obsolete."
+            message = "This method is obsolete because 'KtSelfType' is obsolete.",
+            level = DeprecationLevel.ERROR
     )
     @Deprecated
     @Override
@@ -1040,6 +1068,13 @@ public class KtVisitorVoid extends KtVisitor<Void, Void> {
     @Override
     public Void visitIntersectionType(@NotNull KtIntersectionType intersectionType, Void data) {
         visitIntersectionType(intersectionType);
+        return null;
+    }
+
+    @KtExperimentalApi
+    @Override
+    public Void visitUnionType(@NotNull KtUnionType unionType, Void data) {
+        visitUnionType(unionType);
         return null;
     }
 

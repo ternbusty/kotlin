@@ -1,6 +1,7 @@
 @file:Suppress("UNUSED_VARIABLE")
 
 import com.google.gson.GsonBuilder
+import org.gradle.kotlin.dsl.support.serviceOf
 import com.google.gson.JsonObject
 import org.gradle.api.internal.tasks.testing.junitplatform.JUnitPlatformTestFramework
 import org.gradle.api.publish.internal.PublicationInternal
@@ -13,15 +14,13 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.GenerateProjectStructureMetadata
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinUsages
 import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinJsTargetDsl
 import org.jetbrains.kotlin.library.KOTLINTEST_MODULE_NAME
-import org.jetbrains.kotlin.testFederation.SmokeTestConfig
-import org.jetbrains.kotlin.testFederation.smokeTestConfig
+import org.jetbrains.kotlin.testFederation.testFederation
 import plugins.configureDefaultPublishing
 import plugins.configureKotlinPomAttributes
 import plugins.publishing.configureMultiModuleMavenPublishing
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("multiplatform")
     `maven-publish`
@@ -32,8 +31,11 @@ plugins {
 
 description = "Kotlin Test Library"
 base.archivesName = "kotlin-test"
+val buildFeatures = serviceOf<BuildFeatures>()
 
-configureJvmToolchain(JdkMajorVersion.JDK_1_8)
+jvmToolchains {
+    targetBytecodeVersion = JdkMajorVersion.JDK_1_8
+}
 
 val kotlinTestCapability = "$group:${base.archivesName.get()}:$version" // add to variants with explicit capabilities when the default one is needed, too
 val baseCapability = "$group:kotlin-test-framework:$version"
@@ -111,17 +113,20 @@ kotlin {
                 )
                 val java9CompileOnly = configurations[frameworkJava9SourceSet.compileOnlyConfigurationName]
                 project.dependencies {
-                    java9CompileOnly(project)
+                    java9CompileOnly(project(project.path))
                 }
             }
             test.associateWith(getByName("JUnit"))
         }
     }
+
     js {
-        if (!kotlinBuildProperties.isTeamcityBuild.get()) {
-            browser {}
+        if (!buildFeatures.isolatedProjects.active.get()) {
+            if (!kotlinBuildProperties.isTeamcityBuild.get()) {
+                browser {}
+            }
+            nodejs {}
         }
-        nodejs {}
         compilations["main"].compileTaskProvider.configure {
             compilerOptions.freeCompilerArgs.addAll(
                 "-Xir-module-name=$KOTLINTEST_MODULE_NAME",
@@ -132,7 +137,9 @@ kotlin {
 
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
-        nodejs()
+        if (!buildFeatures.isolatedProjects.active.get()) {
+            nodejs()
+        }
         compilerOptions {
             sourceMap = false
             sourceMapEmbedSources.unsetConvention()
@@ -144,7 +151,9 @@ kotlin {
     }
     @OptIn(ExperimentalWasmDsl::class)
     wasmWasi {
-        nodejs()
+        if (!buildFeatures.isolatedProjects.active.get()) {
+            nodejs()
+        }
         // cast is necessary because of KT-85971
         // update after bootstrap
         (this as KotlinJsTargetDsl).compilerOptions {
@@ -156,7 +165,6 @@ kotlin {
             compilerOptions.addReturnValueCheckerInfo()
         }
     }
-
     targets.all {
         compilations.all {
             compileTaskProvider.configure {
@@ -342,7 +350,6 @@ tasks {
     val allTests = named("allTests") {
         dependsOn(jvmTestTasks)
     }
-
     val generateProjectStructureMetadata = named("generateProjectStructureMetadata", GenerateProjectStructureMetadata::class) {
         val outputTestFile = file("kotlin-project-structure-metadata.beforePatch.json")
         val patchedFile = file("kotlin-project-structure-metadata.json")
@@ -419,8 +426,8 @@ configurations {
             }
         }
         dependencies {
-            apiElements(project)
-            runtimeDeps(project)
+            apiElements(project(project.path))
+            runtimeDeps(project(project.path))
             when (framework) {
                 JvmTestFramework.JUnit -> {}
                 JvmTestFramework.JUnit5 -> {
@@ -451,7 +458,7 @@ configurations {
         extendsFrom(legacyConfigurationDeps.get())
     }
     dependencies {
-        legacyConfigurationDeps(project)
+        legacyConfigurationDeps(project(project.path))
     }
 
     val jvmMainApi = getByName("jvmMainApi")
@@ -587,8 +594,13 @@ publishing {
 }
 
 tasks.withType<Test>().configureEach {
-    smokeTestConfig = if (testFramework is JUnitPlatformTestFramework) SmokeTestConfig.Default
-    else SmokeTestConfig.Disabled
+    if (testFramework !is JUnitPlatformTestFramework) {
+        testFederation {
+            // Not JUnit Platform, so Test Federation cannot select a subset of it
+            smokeTests { skip() }
+            contractTests { skip() }
+        }
+    }
 }
 
 tasks.withType<GenerateModuleMetadata> {

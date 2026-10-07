@@ -1,9 +1,7 @@
 // WITH_STDLIB
-// TARGET_BACKEND: JVM_IR
+// TARGET_BACKEND: JVM
 
 // FILE: Test.kt
-@file:OptIn(ExperimentalVersionOverloading::class)
-
 @JvmInline
 value class Token(val value: String)
 

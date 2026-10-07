@@ -1,7 +1,7 @@
 FILE[kind=File[packageFqName=<root>]]
   PACKAGE_DIRECTIVE
   IMPORT_LIST
-  CLASS[classId=/DefinitelyNotNullTypes, fqName=DefinitelyNotNullTypes, isClsStubCompiledToJvmDefaultImplementation=false, isInterface=false, isLocal=false, isTopLevel=true, name=DefinitelyNotNullTypes, superNames=[]]
+  CLASS[classId=/DefinitelyNotNullTypes, fqName=DefinitelyNotNullTypes, isClsStubCompiledToJvmDefaultImplementation=false, isInterface=false, isTopLevel=true, name=DefinitelyNotNullTypes, superNames=[]]
     TYPE_PARAMETER_LIST
       TYPE_PARAMETER[fqName=null, name=T]
     PRIMARY_CONSTRUCTOR[fqName=null, hasBody=false, hasNoExpressionBody=true, isDelegatedCallToThis=false, isExplicitDelegationCall=false, isExtension=false, isTopLevel=false, mayHaveContract=false, name=DefinitelyNotNullTypes]
@@ -17,7 +17,7 @@ FILE[kind=File[packageFqName=<root>]]
                 USER_TYPE
                   REFERENCE_EXPRESSION[referencedName=Any]
     CLASS_BODY
-      FUN[fqName=DefinitelyNotNullTypes.foo, hasBody=true, hasNoExpressionBody=true, hasTypeParameterListBeforeFunctionName=false, isExtension=false, isTopLevel=false, mayHaveContract=false, name=foo]
+      FUNCTION[fqName=DefinitelyNotNullTypes.foo, hasBody=true, hasNoExpressionBody=true, hasTypeParameterListBeforeFunctionName=false, isExtension=false, isTopLevel=false, mayHaveContract=false, name=foo]
         VALUE_PARAMETER_LIST
           VALUE_PARAMETER[fqName=null, hasDefaultValue=false, hasValOrVar=false, isMutable=false, name=xs]
             TYPE_REFERENCE
@@ -41,7 +41,7 @@ FILE[kind=File[packageFqName=<root>]]
             TYPE_REFERENCE
               USER_TYPE
                 REFERENCE_EXPRESSION[referencedName=Any]
-      FUN[fqName=DefinitelyNotNullTypes.bar, hasBody=true, hasNoExpressionBody=true, hasTypeParameterListBeforeFunctionName=true, isExtension=false, isTopLevel=false, mayHaveContract=false, name=bar]
+      FUNCTION[fqName=DefinitelyNotNullTypes.bar, hasBody=true, hasNoExpressionBody=true, hasTypeParameterListBeforeFunctionName=true, isExtension=false, isTopLevel=false, mayHaveContract=false, name=bar]
         TYPE_PARAMETER_LIST
           TYPE_PARAMETER[fqName=null, name=R]
         VALUE_PARAMETER_LIST

@@ -5,8 +5,6 @@
 
 package org.jetbrains.kotlin.analysis.low.level.api.fir.api
 
-import org.jetbrains.kotlin.analysis.api.KaImplementationDetail
-import org.jetbrains.kotlin.analysis.api.impl.base.util.unexpectedElementError
 import org.jetbrains.kotlin.analysis.api.projectStructure.KaDanglingFileModule
 import org.jetbrains.kotlin.analysis.api.projectStructure.KaDanglingFileResolutionMode
 import org.jetbrains.kotlin.analysis.low.level.api.fir.projectStructure.llFirModuleData
@@ -35,10 +33,7 @@ import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtScript
 import org.jetbrains.kotlin.utils.SmartList
-import org.jetbrains.kotlin.utils.exceptions.ExceptionAttachmentBuilder
-import org.jetbrains.kotlin.utils.exceptions.checkWithAttachment
-import org.jetbrains.kotlin.utils.exceptions.errorWithAttachment
-import org.jetbrains.kotlin.utils.exceptions.requireWithAttachment
+import org.jetbrains.kotlin.utils.exceptions.*
 
 /**
  * This class describes where locates [target] element and its essential [path].
@@ -47,8 +42,7 @@ import org.jetbrains.kotlin.utils.exceptions.requireWithAttachment
  *
  * @see org.jetbrains.kotlin.analysis.low.level.api.fir.api.targets.LLFirResolveTarget
  */
-@KaImplementationDetail
-class FirDesignation(
+internal class FirDesignation(
     /**
      * The path to [target] element.
      *
@@ -118,8 +112,7 @@ class FirDesignation(
     }
 }
 
-@KaImplementationDetail
-fun ExceptionAttachmentBuilder.withFirDesignationEntry(name: String, designation: FirDesignation) {
+internal fun ExceptionAttachmentBuilder.withFirDesignationEntry(name: String, designation: FirDesignation) {
     withEntryGroup(name) {
         for ([index, declaration] in designation.path.withIndex()) {
             withFirEntry("path$index", declaration)
@@ -127,12 +120,6 @@ fun ExceptionAttachmentBuilder.withFirDesignationEntry(name: String, designation
 
         withFirEntry("target", designation.target)
     }
-}
-
-@KaImplementationDetail
-fun FirDesignation.toSequence(includeTarget: Boolean): Sequence<FirElementWithResolveState> = sequence {
-    yieldAll(path)
-    if (includeTarget) yield(target)
 }
 
 private fun tryCollectDesignation(providedFile: FirFile?, target: FirElementWithResolveState): FirDesignation? {
@@ -381,8 +368,7 @@ internal fun FirElementWithResolveState.collectDesignation(providedFile: FirFile
  * @see collectDesignation
  * @see tryCollectDesignation
  */
-@KaImplementationDetail
-fun FirElementWithResolveState.tryCollectDesignationWithOptionalFile(providedFile: FirFile? = null): FirDesignation? =
+internal fun FirElementWithResolveState.tryCollectDesignationWithOptionalFile(providedFile: FirFile? = null): FirDesignation? =
     tryCollectDesignation(providedFile = providedFile, target = this)
 
 /**

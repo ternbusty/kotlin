@@ -1,7 +1,6 @@
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("jvm")
     id("java-test-fixtures")
@@ -14,12 +13,12 @@ dependencies {
     testFixturesApi(project(":core:descriptors.jvm"))
     testFixturesApi(project(":core:deserialization"))
     testFixturesApi(project(":compiler:util"))
-    testFixturesApi(project(":compiler:tests-mutes"))
     testFixturesApi(project(":compiler:backend"))
     testFixturesApi(project(":compiler:ir.tree"))
     testFixturesApi(project(":compiler:fir:tree"))
     testFixturesApi(project(":compiler:fir:raw-fir:psi2fir"))
     testFixturesApi(project(":compiler:fir:raw-fir:light-tree2fir"))
+    testFixturesApi(project(":compiler:fir:raw-fir:mp-parsing2fir"))
     testFixturesApi(project(":compiler:fir:fir2ir"))
     testFixturesApi(project(":compiler:fir:fir2ir:jvm-backend"))
     testFixturesApi(project(":compiler:fir:fir-serialization"))
@@ -34,7 +33,6 @@ dependencies {
     testFixturesApi(project(":compiler:fir:checkers:checkers.native"))
     testFixturesApi(project(":compiler:fir:checkers:checkers.wasm"))
     testFixturesApi(project(":compiler:fir:fir-jvm"))
-    testFixturesApi(project(":compiler:fir:fir-js"))
     testFixturesApi(project(":compiler:fir:entrypoint"))
     testFixturesApi(project(":compiler:frontend"))
     testFixturesApi(project(":compiler:frontend.java"))
@@ -46,7 +44,6 @@ dependencies {
     testFixturesApi(project(":compiler:serialization"))
     testFixturesApi(project(":kotlin-preloader"))
     testFixturesApi(project(":daemon-common"))
-    testFixturesApi(project(":js:js.frontend"))
     testFixturesApi(project(":native:frontend.native"))
     testFixturesImplementation(project(":native:native.config"))
     testFixturesImplementation(project(":kotlin-util-klib-metadata"))
@@ -103,4 +100,3 @@ sourceSets {
     "testFixtures" { projectDefault() }
 }
 
-testsJar {}

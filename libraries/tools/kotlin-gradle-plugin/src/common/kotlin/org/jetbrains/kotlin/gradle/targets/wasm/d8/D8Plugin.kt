@@ -10,9 +10,11 @@ import org.gradle.api.Project
 import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.plugins.ExtensionContainer
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.targets.js.internal.jsToolingProject
 import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmPlatformDisambiguator
 import org.jetbrains.kotlin.gradle.targets.web.HasPlatformDisambiguator
 import org.jetbrains.kotlin.gradle.tasks.registerTask
+import org.jetbrains.kotlin.gradle.utils.isRootProject
 
 @ExperimentalWasmDsl
 abstract class D8Plugin internal constructor() : Plugin<Project> {
@@ -21,8 +23,8 @@ abstract class D8Plugin internal constructor() : Plugin<Project> {
 
         val spec = project.extensions.createD8EnvSpec()
 
-        if (project == project.rootProject) {
-            @Suppress("DEPRECATION")
+        if (project.isRootProject()) {
+            @Suppress("DEPRECATION_ERROR")
             project.extensions.create(
                 D8RootExtension.EXTENSION_NAME,
                 D8RootExtension::class.java,
@@ -31,7 +33,7 @@ abstract class D8Plugin internal constructor() : Plugin<Project> {
             )
         }
 
-        val d8RootExtension = applyRootProject(project.rootProject)
+        val d8RootExtension = applyRootProject(project)
 
         spec.initializeD8EnvSpec(d8RootExtension)
 
@@ -55,7 +57,7 @@ abstract class D8Plugin internal constructor() : Plugin<Project> {
         )
     }
 
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION_ERROR")
     private fun D8EnvSpec.initializeD8EnvSpec(
         d8: D8RootExtension,
     ) {
@@ -79,10 +81,10 @@ abstract class D8Plugin internal constructor() : Plugin<Project> {
             ) as D8EnvSpec
         }
 
-        @Suppress("DEPRECATION")
+        @Suppress("DEPRECATION_ERROR")
         private fun applyRootProject(project: Project): D8RootExtension {
-            project.rootProject.plugins.apply(D8Plugin::class.java)
-            return project.rootProject.extensions.getByName(
+            project.jsToolingProject().plugins.apply(D8Plugin::class.java)
+            return project.jsToolingProject().extensions.getByName(
                 D8RootExtension.EXTENSION_NAME
             ) as D8RootExtension
         }

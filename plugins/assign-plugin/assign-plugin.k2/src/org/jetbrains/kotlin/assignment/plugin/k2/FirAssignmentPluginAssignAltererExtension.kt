@@ -6,9 +6,9 @@
 package org.jetbrains.kotlin.assignment.plugin.k2
 
 import org.jetbrains.kotlin.KtFakeSourceElementKind
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.FirSession
-import org.jetbrains.kotlin.fir.declarations.DirectDeclarationsAccess
+import org.jetbrains.kotlin.fir.analysis.checkers.hasDiagnosticKind
+import org.jetbrains.kotlin.fir.diagnostics.DiagnosticKind
 import org.jetbrains.kotlin.fir.expressions.*
 import org.jetbrains.kotlin.fir.expressions.builder.buildFunctionCall
 import org.jetbrains.kotlin.fir.expressions.builder.buildPropertyAccessExpression
@@ -21,11 +21,11 @@ import org.jetbrains.kotlin.fir.symbols.impl.FirBackingFieldSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirFieldSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirRegularPropertySymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirVariableSymbol
+import org.jetbrains.kotlin.fir.types.resolvedType
 import org.jetbrains.kotlin.fir.types.upperBoundIfFlexible
 import org.jetbrains.kotlin.types.expressions.OperatorConventions.ASSIGN_METHOD
 import org.jetbrains.kotlin.utils.addToStdlib.runIf
 
-@OptIn(DirectDeclarationsAccess::class)
 class FirAssignmentPluginAssignAltererExtension(
     session: FirSession
 ) : FirAssignExpressionAltererExtension(session) {
@@ -37,6 +37,10 @@ class FirAssignmentPluginAssignAltererExtension(
     }
 
     private fun FirVariableAssignment.supportsTransformVariableAssignment(): Boolean {
+        // The variable's implicit type is still being computed (e.g., `val x = x = ...`),
+        // so its return type cannot be requested
+        if (lValue.resolvedType.hasDiagnosticKind(DiagnosticKind.RecursionInImplicitTypes)) return false
+
         return when (val lSymbol = calleeReference?.toResolvedVariableSymbol()) {
             is FirRegularPropertySymbol -> lSymbol.isVal && lSymbol.hasSpecialAnnotation()
             is FirBackingFieldSymbol -> lSymbol.isVal && lSymbol.hasSpecialAnnotation()

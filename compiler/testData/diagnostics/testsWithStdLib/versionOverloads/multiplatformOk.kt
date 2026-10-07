@@ -1,9 +1,7 @@
-// RUN_PIPELINE_TILL: BACKEND
+// RUN_PIPELINE_TILL: CODEGEN
 // LANGUAGE: +MultiPlatformProjects
 // MODULE: m1-common
 // FILE: common.kt
-
-@file:OptIn(ExperimentalVersionOverloading::class)
 
 expect fun foo(
     x: String = "O",
@@ -12,8 +10,6 @@ expect fun foo(
 
 // MODULE: m2-jvm()()(m1-common)
 // FILE: jvm.kt
-
-@file:OptIn(ExperimentalVersionOverloading::class)
 
 actual fun foo(
     x: String,

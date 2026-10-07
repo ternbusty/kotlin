@@ -1,12 +1,9 @@
-import org.jetbrains.kotlin.testFederation.SmokeTestConfig
-import org.jetbrains.kotlin.testFederation.smokeTestConfig
+import org.jetbrains.kotlin.testFederation.testFederation
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("jvm")
-    id("project-tests-convention")
     id("test-inputs-check")
     id("share-foreign-java-nullability-annotations")
     id("java-test-fixtures")
@@ -25,6 +22,7 @@ dependencies {
     testFixturesImplementation(project(":kotlin-util-klib-abi"))
     testFixturesImplementation(project(":kotlin-util-klib-metadata"))
     testFixturesImplementation(project(":wasm:wasm.frontend"))
+    testFixturesImplementation(project(":kotlin-tooling-core"))
     testFixturesImplementation(project(":compiler:ir.backend.native"))
     testFixturesImplementation(intellijCore())
     testFixturesImplementation(commonDependency("org.jetbrains.kotlin:kotlin-reflect")) { isTransitive = false }
@@ -41,7 +39,6 @@ dependencies {
     testFixturesApi(testFixtures(project(":compiler:test-infrastructure-utils")))
     testFixturesApi(testFixtures(project(":compiler:tests-compiler-utils")))
     testFixturesApi(project(":libraries:tools:abi-comparator"))
-    testFixturesApi(project(":compiler:tests-mutes:mutes-junit5"))
 
     /*
      * Actually those dependencies are needed only at runtime, but they
@@ -119,7 +116,6 @@ projectTests {
 
     withJvmStdlibAndReflect()
     withStdlibCommon()
-    withScriptRuntime()
     withTestJar()
     withAnnotations()
     withScriptingPlugin()
@@ -141,9 +137,11 @@ projectTests {
             JdkMajorVersion.JDK_21_0, // e.g. org.jetbrains.kotlin.test.runners.codegen.FirLightTreeBlackBoxModernJdkCodegenTestGenerated.TestsWithJava21
         )
     ) {
-        smokeTestConfig = SmokeTestConfig.Enabled(
-            autoSmokeTestPercentage = 3
-        )
+        testFederation {
+            smokeTests {
+                includeAutoSamples(percentage = 3)
+            }
+        }
     }
 
     testGenerator("org.jetbrains.kotlin.test.TestGeneratorForTestCommonNewKt", generateTestsInBuildDirectory = true)

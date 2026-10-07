@@ -13,7 +13,6 @@ import org.jetbrains.kotlin.builtins.StandardNames.ENUM_VALUES
 import org.jetbrains.kotlin.builtins.StandardNames.ENUM_VALUE_OF
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.declarations.*
 import org.jetbrains.kotlin.fir.declarations.builder.FirRegularClassBuilder
 import org.jetbrains.kotlin.fir.declarations.builder.buildProperty
@@ -273,6 +272,8 @@ fun generateEntriesGetter(
             this.status = createStatus(classStatus).apply {
                 isStatic = true
             }
+
+            containingClassForStaticMemberAttr = classSymbol.toLookupTag()
         }
     }.apply {
         containingClassForStaticMemberAttr = classSymbol.toLookupTag()

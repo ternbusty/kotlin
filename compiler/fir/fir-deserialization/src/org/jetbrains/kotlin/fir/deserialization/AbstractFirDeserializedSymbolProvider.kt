@@ -8,6 +8,7 @@ package org.jetbrains.kotlin.fir.deserialization
 import org.jetbrains.kotlin.fir.FirModuleData
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.caches.FirCache
+import org.jetbrains.kotlin.fir.caches.FirCacheInternals
 import org.jetbrains.kotlin.fir.caches.createCache
 import org.jetbrains.kotlin.fir.caches.firCachesFactory
 import org.jetbrains.kotlin.fir.caches.getValue
@@ -15,9 +16,9 @@ import org.jetbrains.kotlin.fir.declarations.FirDeclarationOrigin
 import org.jetbrains.kotlin.fir.declarations.FirFunction
 import org.jetbrains.kotlin.fir.declarations.FirProperty
 import org.jetbrains.kotlin.fir.declarations.FirTypeAlias
+import org.jetbrains.kotlin.fir.declarations.utils.isExpect
 import org.jetbrains.kotlin.fir.declarations.utils.klibFileAnnotations
 import org.jetbrains.kotlin.fir.expressions.FirAnnotation
-import org.jetbrains.kotlin.fir.declarations.utils.isExpect
 import org.jetbrains.kotlin.fir.isNewPlaceForBodyGeneration
 import org.jetbrains.kotlin.fir.resolve.providers.FirCachedSymbolNamesProvider
 import org.jetbrains.kotlin.fir.resolve.providers.FirSymbolNamesProvider
@@ -27,7 +28,10 @@ import org.jetbrains.kotlin.fir.scopes.FirKotlinScopeProvider
 import org.jetbrains.kotlin.fir.symbols.impl.*
 import org.jetbrains.kotlin.metadata.ProtoBuf
 import org.jetbrains.kotlin.metadata.deserialization.NameResolver
-import org.jetbrains.kotlin.name.*
+import org.jetbrains.kotlin.name.CallableId
+import org.jetbrains.kotlin.name.ClassId
+import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.serialization.SerializerExtensionProtocol
 import org.jetbrains.kotlin.serialization.deserialization.descriptors.DeserializedContainerSource
 import org.jetbrains.kotlin.serialization.deserialization.getName
@@ -168,7 +172,7 @@ abstract class AbstractFirDeserializedSymbolProvider(
             getPackageParts(fqName).flatMapTo(mutableSetOf()) { it.typeAliasNameIndex.keys }
         }
 
-    private val packagePartsCache = session.firCachesFactory.createCache(::tryComputePackagePartInfos)
+    private val packagePartsCache: FirCache<FqName, List<PackagePartsCacheData>, Nothing?> = session.firCachesFactory.createCache(::tryComputePackagePartInfos)
 
     private val typeAliasCache: FirCache<ClassId, FirTypeAliasSymbol?, FirNestedTypeAliasDeserializationContext?> =
         session.firCachesFactory.createCacheWithPostCompute(
@@ -190,8 +194,8 @@ abstract class AbstractFirDeserializedSymbolProvider(
             }
         )
 
-    private val functionCache = session.firCachesFactory.createCache(::loadFunctionsByCallableId)
-    private val propertyCache = session.firCachesFactory.createCache(::loadPropertiesByCallableId)
+    private val functionCache: FirCache<CallableId, List<FirNamedFunctionSymbol>, Nothing?> = session.firCachesFactory.createCache(::loadFunctionsByCallableId)
+    private val propertyCache: FirCache<CallableId, List<FirPropertySymbol>, Nothing?> = session.firCachesFactory.createCache(::loadPropertiesByCallableId)
 
     // ------------------------ Abstract members ------------------------
 
@@ -335,7 +339,7 @@ abstract class AbstractFirDeserializedSymbolProvider(
             val propertyIds = part.topLevelPropertyNameIndex[callableId.callableName] ?: return@flatMap emptyList()
             propertyIds.map {
                 val proto = part.proto.getProperty(it)
-                val fir = part.context.memberDeserializer.loadProperty(proto)
+                val fir = part.context.memberDeserializer.loadProperty(proto, deserializationOrigin = defaultDeserializationOrigin)
                 loadPropertyExtensions(part, proto, fir)
                 if (part.fileAnnotations.isNotEmpty()) {
                     fir.klibFileAnnotations = part.fileAnnotations
@@ -462,5 +466,11 @@ abstract class AbstractFirDeserializedSymbolProvider(
             return clazz
         }
         return getTypeAlias(classId, nestedTypeAliasContext = null) ?: clazz
+    }
+
+    @FirSymbolProviderInternals
+    override fun clearInsignificantCaches() {
+        @OptIn(FirCacheInternals::class)
+        packagePartsCache.clear()
     }
 }

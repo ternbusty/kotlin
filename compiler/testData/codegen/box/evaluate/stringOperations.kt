@@ -25,9 +25,12 @@ const val equals1 = someStr == "123"
 const val equals2 = someStr == otherStr
 const val equals3 = otherStr == someStr
 
+const val notEquals1 = someStr != "123"
+const val notEquals2 = someStr != otherStr
+const val notEquals3 = otherStr != someStr
+
 const val toString1 = someStr.toString()
 
-// STOP_EVALUATION_CHECKS
 fun box(): String {
     if (plus1.id() != "123other")    return "Fail 1.1"
     if (plus2.id() != "1231")        return "Fail 1.2"
@@ -46,6 +49,10 @@ fun box(): String {
     if (equals1.id() != true)    return "Fail 5.1"
     if (equals2.id() != false)   return "Fail 5.2"
     if (equals3.id() != false)   return "Fail 5.3"
+
+    if (notEquals1.id() != false)   return "Fail 5.4"
+    if (notEquals2.id() != true)    return "Fail 5.5"
+    if (notEquals3.id() != true)    return "Fail 5.6"
 
     if (toString1.id() != "123") return "Fail 6.1"
     return "OK"

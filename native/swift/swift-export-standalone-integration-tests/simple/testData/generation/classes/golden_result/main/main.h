@@ -3,6 +3,22 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+int32_t intersection_overrides_AbstractFooBar_baz_get__reverse_swift(void * self);
+
+int32_t intersection_overrides_AbstractFooBar_fooBar_get__reverse_swift(void * self);
+
+NSString * intersection_overrides_Bar_bar_get__reverse_swift(void * self);
+
+int32_t intersection_overrides_Bar_baz_get__reverse_swift(void * self);
+
+NSString * intersection_overrides_Baz_bar_get__reverse_swift(void * self);
+
+NSString * intersection_overrides_Baz_foo_get__reverse_swift(void * self);
+
+int32_t intersection_overrides_Foo_baz_get__reverse_swift(void * self);
+
+NSString * intersection_overrides_Foo_foo_get__reverse_swift(void * self);
+
 int32_t CLASS_WITH_SAME_NAME_foo(void * self);
 
 int32_t ClassWithNonPublicConstructor_a_get(void * self);
@@ -19,31 +35,13 @@ double DATA_CLASS_WITH_MANY_FIELDS_d_get(void * self);
 
 NSString * DATA_CLASS_WITH_MANY_FIELDS_e_get(void * self);
 
-_Bool DATA_CLASS_WITH_MANY_FIELDS_equals__TypesOfArguments__Swift_Optional_anyU20KotlinRuntimeSupport__KotlinBridgeable___(void * self, void * _Nullable other);
-
-int32_t DATA_CLASS_WITH_MANY_FIELDS_hashCode(void * self);
-
-NSString * DATA_CLASS_WITH_MANY_FIELDS_toString(void * self);
-
 void * DATA_CLASS_WITH_REF_copy__TypesOfArguments__anyU20KotlinRuntimeSupport__KotlinBridgeable__(void * self, void * o);
 
-_Bool DATA_CLASS_WITH_REF_equals__TypesOfArguments__Swift_Optional_anyU20KotlinRuntimeSupport__KotlinBridgeable___(void * self, void * _Nullable other);
-
-int32_t DATA_CLASS_WITH_REF_hashCode(void * self);
-
 void * DATA_CLASS_WITH_REF_o_get(void * self);
-
-NSString * DATA_CLASS_WITH_REF_toString(void * self);
 
 int32_t DATA_CLASS_a_get(void * self);
 
 void * DATA_CLASS_copy__TypesOfArguments__Swift_Int32__(void * self, int32_t a);
-
-_Bool DATA_CLASS_equals__TypesOfArguments__Swift_Optional_anyU20KotlinRuntimeSupport__KotlinBridgeable___(void * self, void * _Nullable other);
-
-int32_t DATA_CLASS_hashCode(void * self);
-
-NSString * DATA_CLASS_toString(void * self);
 
 void * ENUM_A();
 
@@ -85,21 +83,9 @@ int64_t Foo_my_variable_get(void * self);
 
 _Bool Foo_my_variable_set__TypesOfArguments__Swift_Int64__(void * self, int64_t newValue);
 
-_Bool INLINE_CLASS_WITH_REF_equals__TypesOfArguments__Swift_Optional_anyU20KotlinRuntimeSupport__KotlinBridgeable___(void * self, void * _Nullable other);
-
-int32_t INLINE_CLASS_WITH_REF_hashCode(void * self);
-
 void * INLINE_CLASS_WITH_REF_i_get(void * self);
 
-NSString * INLINE_CLASS_WITH_REF_toString(void * self);
-
 int32_t INLINE_CLASS_a_get(void * self);
-
-_Bool INLINE_CLASS_equals__TypesOfArguments__Swift_Optional_anyU20KotlinRuntimeSupport__KotlinBridgeable___(void * self, void * _Nullable other);
-
-int32_t INLINE_CLASS_hashCode(void * self);
-
-NSString * INLINE_CLASS_toString(void * self);
 
 void * OBJECT_NO_PACKAGE_Bar_CLASS_INSIDE_CLASS_INSIDE_OBJECT_init_allocate();
 
@@ -149,6 +135,8 @@ _Bool SEALED_C_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer_
 
 void * SEALED_O_get();
 
+_Bool __root___ABSTRACT_CLASS_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
+
 void * __root___CLASS_WITH_SAME_NAME_init_allocate();
 
 _Bool __root___CLASS_WITH_SAME_NAME_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
@@ -197,6 +185,38 @@ void * __root___OBJECT_NO_PACKAGE_get();
 
 void * __root___OBJECT_WITH_GENERIC_INHERITANCE_get();
 
+_Bool intersection_overrides_AbstractBazFoo_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
+
+int32_t intersection_overrides_AbstractFooBar_baz_get(void * self);
+
+int32_t intersection_overrides_AbstractFooBar_fooBar_get(void * self);
+
+_Bool intersection_overrides_AbstractFooBar_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
+
+NSString * intersection_overrides_Bar_bar_get(void * self);
+
+int32_t intersection_overrides_Bar_baz_get(void * self);
+
+NSString * intersection_overrides_Baz_bar_get(void * self);
+
+NSString * intersection_overrides_Baz_bar_get_direct(void * self);
+
+int32_t intersection_overrides_Baz_baz_get(void * self);
+
+int32_t intersection_overrides_Baz_fooBar_get(void * self);
+
+NSString * intersection_overrides_Baz_foo_get(void * self);
+
+NSString * intersection_overrides_Baz_foo_get_direct(void * self);
+
+void * intersection_overrides_Baz_init_allocate();
+
+_Bool intersection_overrides_Baz_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
+
+int32_t intersection_overrides_Foo_baz_get(void * self);
+
+NSString * intersection_overrides_Foo_foo_get(void * self);
+
 void * namespace_Foo_INSIDE_CLASS_init_allocate();
 
 _Bool namespace_Foo_INSIDE_CLASS_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
@@ -217,15 +237,9 @@ void * namespace_NAMESPACED_CLASS_init_allocate();
 
 _Bool namespace_NAMESPACED_CLASS_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(void * __kt);
 
-_Bool namespace_deeper_DATA_OBJECT_WITH_PACKAGE_equals__TypesOfArguments__Swift_Optional_anyU20KotlinRuntimeSupport__KotlinBridgeable___(void * self, void * _Nullable other);
-
 int32_t namespace_deeper_DATA_OBJECT_WITH_PACKAGE_foo(void * self);
 
 void * namespace_deeper_DATA_OBJECT_WITH_PACKAGE_get();
-
-int32_t namespace_deeper_DATA_OBJECT_WITH_PACKAGE_hashCode(void * self);
-
-NSString * namespace_deeper_DATA_OBJECT_WITH_PACKAGE_toString(void * self);
 
 int32_t namespace_deeper_DATA_OBJECT_WITH_PACKAGE_value_get(void * self);
 

@@ -22,14 +22,13 @@ import org.jetbrains.kotlin.test.frontend.fir.FirOutputArtifact
 import org.jetbrains.kotlin.test.model.*
 import org.jetbrains.kotlin.test.runners.AbstractKotlinCompilerWithTargetBackendTest
 import org.jetbrains.kotlin.test.runners.UnspecifiedTargetBackend
-import org.jetbrains.kotlin.test.services.LibraryProvider
 import org.jetbrains.kotlin.test.services.configuration.CommonEnvironmentConfigurator
-import org.jetbrains.kotlin.testFederation.AffectedByCommonBackend
+import org.jetbrains.kotlin.testFederation.MustRunOnChangesInCommonBackend
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 
 @OptIn(UnspecifiedTargetBackend::class)
-@AffectedByCommonBackend
+@MustRunOnChangesInCommonBackend
 abstract class AbstractSymbolsValidationTest(
     targetBackend: TargetBackend,
     private val targetPlatform: TargetPlatform,
@@ -55,8 +54,6 @@ abstract class AbstractSymbolsValidationTest(
         defaultDirectives {
             +ConfigurationDirectives.WITH_STDLIB
         }
-
-        useAdditionalService(::LibraryProvider)
 
         facadeStep(frontendFacade)
         firHandlersStep()

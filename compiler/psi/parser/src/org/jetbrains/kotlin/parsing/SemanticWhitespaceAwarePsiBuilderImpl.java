@@ -1,17 +1,6 @@
 /*
- * Copyright 2010-2015 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
 package org.jetbrains.kotlin.parsing;
@@ -30,7 +19,7 @@ import org.jetbrains.kotlin.lexer.KtTokens;
 import static org.jetbrains.kotlin.lexer.KtTokens.*;
 
 public class SemanticWhitespaceAwarePsiBuilderImpl extends PsiBuilderAdapter implements SemanticWhitespaceAwarePsiBuilder {
-    private final TokenSet complexTokens = TokenSet.create(SAFE_ACCESS, ELVIS, EXCLEXCL);
+    private final TokenSet complexTokens = TokenSet.create(SAFE_ACCESS, ERROR_SAFE_ACCESS, ELVIS, EXCLEXCL);
     private final Stack<Boolean> joinComplexTokens = new Stack<>();
 
     private final Stack<Boolean> newlinesEnabled = new Stack<>();
@@ -47,7 +36,8 @@ public class SemanticWhitespaceAwarePsiBuilderImpl extends PsiBuilderAdapter imp
 
     @Nullable
     private static PsiBuilderImpl findPsiBuilderImpl(PsiBuilder builder) {
-        // This is a hackish workaround for PsiBuilder interface not exposing isWhitespaceOrComment() method
+        // SyntaxTreeBuilder#isWhitespaceOrComment has a default implementation returning false,
+        // so the concrete PsiBuilderImpl is required to get a real answer.
         // We have to unwrap all the adapters to find an Impl inside
         while (true) {
             if (builder instanceof PsiBuilderImpl) {
@@ -62,10 +52,9 @@ public class SemanticWhitespaceAwarePsiBuilderImpl extends PsiBuilderAdapter imp
     }
 
     @Override
-    @SuppressWarnings("deprecation") // KT-78356
     public boolean isWhitespaceOrComment(@NotNull IElementType elementType) {
         assert delegateImpl != null : "PsiBuilderImpl not found";
-        return delegateImpl.whitespaceOrComment(elementType);
+        return delegateImpl.isWhitespaceOrComment(elementType);
     }
 
     @Override
@@ -156,6 +145,10 @@ public class SemanticWhitespaceAwarePsiBuilderImpl extends PsiBuilderAdapter imp
             IElementType nextRawToken = rawLookup(rawLookupSteps);
             if (nextRawToken == EXCL) return EXCLEXCL;
         }
+        else if (rawTokenType == OR) {
+            IElementType nextRawToken = rawLookup(rawLookupSteps);
+            if (nextRawToken == DOT) return ERROR_SAFE_ACCESS;
+        }
         return rawTokenType;
     }
 
@@ -184,6 +177,7 @@ public class SemanticWhitespaceAwarePsiBuilderImpl extends PsiBuilderAdapter imp
         if (complexTokens.contains(tokenType)) {
                 if (tokenType == ELVIS) return "?:";
                 if (tokenType == SAFE_ACCESS) return "?.";
+                if (tokenType == ERROR_SAFE_ACCESS) return "|.";
             }
         return super.getTokenText();
     }

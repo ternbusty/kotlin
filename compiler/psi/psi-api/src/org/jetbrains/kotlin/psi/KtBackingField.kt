@@ -2,12 +2,14 @@
  * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
+@file:OptIn(KtImplementationDetail::class)
+
 package org.jetbrains.kotlin.psi
 
 import com.intellij.lang.ASTNode
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
-import org.jetbrains.kotlin.KtStubBasedElementTypes
+import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.stubs.KotlinBackingFieldStub
 
@@ -24,21 +26,30 @@ import org.jetbrains.kotlin.psi.stubs.KotlinBackingFieldStub
  *
  * Note: this class is not intended to be extended and is marked `open` solely for backward compatibility.
  */
+@SubclassOptInRequired(KtImplementationDetail::class)
 open class KtBackingField : KtDeclarationStub<KotlinBackingFieldStub>, KtModifierListOwner, KtDeclarationWithInitializer,
     KtDeclarationWithReturnType {
+    @KtImplementationDetail
     constructor(node: ASTNode) : super(node)
-    constructor(stub: KotlinBackingFieldStub) : super(stub, KtStubBasedElementTypes.BACKING_FIELD)
+
+    @KtImplementationDetail
+    constructor(stub: KotlinBackingFieldStub) : super(stub, KtNodeTypes.BACKING_FIELD)
 
     override fun <R, D> accept(visitor: KtVisitor<R, D>, data: D): R =
         visitor.visitBackingField(this, data)
 
+    /**
+     * The `=` token preceding the initializer, or `null` if the backing field has no initializer.
+     */
     open val equalsToken: PsiElement?
         get() = findChildByType(KtTokens.EQ)
 
     override fun getTypeReference(): KtTypeReference? =
-        @Suppress("DEPRECATION") // KT-78356
-        getStubOrPsiChild(KtStubBasedElementTypes.TYPE_REFERENCE)
+        getStubOrPsiChild(KtNodeTypes.TYPE_REFERENCE, KtTypeReference::class.java)
 
+    /**
+     * The `field` keyword that stands in for the declaration's name, or the element itself if the keyword is absent.
+     */
     open val namePlaceholder: PsiElement
         get() = fieldKeyword ?: node.psi
 
@@ -62,6 +73,15 @@ open class KtBackingField : KtDeclarationStub<KotlinBackingFieldStub>, KtModifie
     override fun getTextOffset(): Int =
         namePlaceholder.textRange.startOffset
 
+    /**
+     * The property this backing field belongs to.
+     */
+    val property: KtProperty
+        get() = parent as KtProperty
+
+    /**
+     * The `field` keyword introducing this backing field declaration, or `null` if it is absent in incomplete code.
+     */
     open val fieldKeyword: PsiElement?
         get() = findChildByType(KtTokens.FIELD_KEYWORD)
 
@@ -69,6 +89,7 @@ open class KtBackingField : KtDeclarationStub<KotlinBackingFieldStub>, KtModifie
     @Deprecated(
         message = "Use typeReference instead",
         replaceWith = ReplaceWith("typeReference"),
+        level = DeprecationLevel.ERROR,
     )
     open val returnTypeReference: KtTypeReference?
         get() = typeReference

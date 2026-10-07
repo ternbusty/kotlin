@@ -292,9 +292,7 @@ abstract class ExecutionStrategyIT : KGPDaemonsBaseTest() {
                     assertOutputContains("Invalid maximum heap size: -Xmxqwerty")
                     assertOutputContains("Using fallback strategy (kotlin.daemon.useFallbackStrategy=true): Compile without Kotlin daemon")
                 } else if (executionStrategy == KotlinCompilerExecutionStrategy.DAEMON) {
-                    // 256m is the default value for Gradle 5.0+
-                    val defaultJvmSettingsForGivenGradleVersion =
-                        if (gradleVersion < GradleVersion.version(TestVersions.Gradle.G_8_0)) "256" else "384"
+                    val defaultJvmSettingsForGivenGradleVersion = "384"
                     assertKotlinDaemonJvmOptions(
                         listOf("-XX:MaxMetaspaceSize=${defaultJvmSettingsForGivenGradleVersion}m", "-ea")
                     )
@@ -343,10 +341,6 @@ class NoActiveThreadsAfterCompilerInvocationIT : KGPDaemonsBaseTest() {
     @GradleTest
     fun testBta(gradleVersion: GradleVersion) = test(gradleVersion, buildOptions = defaultBuildOptions.copy(runViaBuildToolsApi = true))
 
-    @DisplayName("KT-84152: In-process compilation should not leave active threads")
-    @GradleTest
-    fun testNonBta(gradleVersion: GradleVersion) = test(gradleVersion, buildOptions = defaultBuildOptions.copy(runViaBuildToolsApi = false))
-
     private fun test(
         gradleVersion: GradleVersion,
         buildOptions: BuildOptions
@@ -358,6 +352,7 @@ class NoActiveThreadsAfterCompilerInvocationIT : KGPDaemonsBaseTest() {
                 // model builder below breaks configuration cache in Gradle 9+,
                 // making it configuration cache friendly isn't necessary for this test
                 configurationCache = BuildOptions.ConfigurationCacheValue.DISABLED,
+                isolatedProjects = BuildOptions.IsolatedProjectsMode.DISABLED,
                 compilerExecutionStrategy = KotlinCompilerExecutionStrategy.IN_PROCESS
             )
         ) {
@@ -374,7 +369,7 @@ class NoActiveThreadsAfterCompilerInvocationIT : KGPDaemonsBaseTest() {
                 fun makeThreadsSnapshot(): Set<String> = Thread
                     .getAllStackTraces()
                     .keys.groupBy { it.javaClass.name + ":" + it.name }
-                    .map { [name, threads] -> "$name (total ${threads.size})" }.toSet()
+                    .map { (name, threads) -> "$name (total ${threads.size})" }.toSet()
 
                 project.tasks.named("compileKotlin").configure {
                     it.doFirst {

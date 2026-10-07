@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2019 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
@@ -11,10 +11,7 @@ import com.intellij.lang.PsiBuilderFactory
 import com.intellij.openapi.project.Project
 import com.intellij.psi.tree.ICompositeElementType
 import com.intellij.psi.tree.IErrorCounterReparseableElementType
-import com.intellij.psi.tree.TokenSet
-import org.jetbrains.kotlin.KtNodeTypes.BLOCK_CODE_FRAGMENT
-import org.jetbrains.kotlin.KtNodeTypes.FUNCTION_LITERAL
-import org.jetbrains.kotlin.KtNodeTypes.SCRIPT
+import org.jetbrains.kotlin.KtNodeTypes.*
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.lexer.KotlinLexer
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -29,8 +26,8 @@ class BlockExpressionElementType : IErrorCounterReparseableElementType("BLOCK", 
 
     override fun isParsable(parent: ASTNode?, buffer: CharSequence, fileLanguage: Language, project: Project) =
         fileLanguage == KotlinLanguage.INSTANCE &&
-                BlockExpressionElementType.isAllowedParentNode(parent) &&
-                BlockExpressionElementType.isReparseableBlock(buffer) &&
+                isAllowedParentNode(parent) &&
+                isReparseableBlock(buffer) &&
                 super.isParsable(buffer, fileLanguage, project)
 
     override fun getErrorsCount(seq: CharSequence, fileLanguage: Language, project: Project) =

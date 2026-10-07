@@ -16,16 +16,17 @@ import org.gradle.internal.extensions.core.serviceOf
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 import org.jetbrains.kotlin.gradle.dsl.KotlinNativeBinaryContainer
+import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.plugin.PropertiesProvider.Companion.kotlinPropertiesProvider
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.KotlinToolingDiagnostics
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.KotlinToolingDiagnosticsCollector
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.ToolingDiagnosticsContext
-import org.jetbrains.kotlin.gradle.plugin.diagnostics.kotlinToolingDiagnosticsCollector
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.kotlinToolingDiagnosticsCollectorProvider
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.reportDiagnostic
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.toolingDiagnosticsContext
 import org.jetbrains.kotlin.gradle.plugin.mpp.*
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.FrameworkCopy.Companion.dsymFile
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.swiftexport.SwiftExportConstants
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.swiftexport.SwiftExportDSLConstants
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.swiftexport.SwiftExportExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.swiftexport.registerSwiftExportTask
@@ -38,18 +39,19 @@ import org.jetbrains.kotlin.gradle.utils.lowerCamelCaseName
 import org.jetbrains.kotlin.gradle.utils.mapToFile
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.swiftimport.*
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.swiftimport.GenerateSyntheticLinkageImportProject.Companion.SYNTHETIC_IMPORT_TARGET_MAGIC_NAME
+import org.jetbrains.kotlin.gradle.plugin.mpp.export.ExportExtension
+import org.jetbrains.kotlin.gradle.plugin.mpp.export.internal.SwiftExportConfigurationCompat
 import org.jetbrains.kotlin.gradle.utils.reportXcodeError
 import java.io.File
 import java.nio.file.Paths
 import javax.inject.Inject
-import kotlin.collections.component1
-import kotlin.collections.component2
 
 @Suppress("ConstPropertyName")
 internal object AppleXcodeTasks {
     const val embedAndSignTaskPrefix = "embedAndSign"
     const val embedAndSignTaskPostfix = "AppleFrameworkForXcode"
     const val validateArchitecturesForTaskPrefix = "validateArchitecturesFor"
+    const val validateDeploymentTargetForTaskPrefix = "validateDeploymentTargetFor"
     const val checkSandboxAndWriteProtection = "checkSandboxAndWriteProtection"
 }
 
@@ -195,6 +197,7 @@ internal fun Project.registerEmbedSwiftExportTask(
     target: KotlinNativeTarget,
     environment: XcodeEnvironment,
     swiftExportExtension: SwiftExportExtension,
+    exportExtension: ExportExtension,
 ) {
     val envTargets = environment.targets
     val binaryTaskName = embedSwiftExportTaskName()
@@ -218,6 +221,11 @@ internal fun Project.registerEmbedSwiftExportTask(
         configuredTarget = target.konanTarget.visibleName,
     )
 
+    val validateDeploymentTargetTask = registerValidateSwiftExportDeploymentTargetTask(
+        frameworkTaskName = binaryTaskName,
+        environment = environment,
+    )
+
     val embedAndSignTask = locateOrRegisterTask<EmbedSwiftExportForXcodeTask>(binaryTaskName) { task ->
         task.group = BasePlugin.BUILD_GROUP
         task.description = "Embed Swift Export artifacts requested by Xcode's environment variables"
@@ -228,6 +236,7 @@ internal fun Project.registerEmbedSwiftExportTask(
     }
 
     embedAndSignTask.dependsOn(validateTask)
+    embedAndSignTask.dependsOn(validateDeploymentTargetTask)
 
     if (!envTargets.contains(target.konanTarget)) {
         return
@@ -235,8 +244,27 @@ internal fun Project.registerEmbedSwiftExportTask(
 
     val sandBoxTask = checkSandboxAndWriteProtectionTask(environment, environment.userScriptSandboxingEnabled)
 
+    val kotlinNativeCompilation = target.compilations.getByName(KotlinCompilation.MAIN_COMPILATION_NAME)
+    val swiftExportConfiguration = if (exportExtension.isSwiftExportConfigured) {
+        SwiftExportConfigurationCompat.from(
+            configuration = exportExtension.swiftExportConfiguration,
+            integration = checkNotNull(exportExtension.swiftExportConfiguration.activatedXcodeIntegration) {
+                "The Xcode integration is not activated in project '$path'"
+            },
+            kotlinNativeCompilation = kotlinNativeCompilation,
+            providers = providers,
+        )
+    } else {
+        SwiftExportConfigurationCompat.from(
+            extension = swiftExportExtension,
+            target = target,
+            buildType = envBuildType,
+            kotlinNativeCompilation = kotlinNativeCompilation,
+            providers = providers,
+        )
+    }
     val swiftExportTask = registerSwiftExportTask(
-        swiftExportExtension,
+        swiftExportConfiguration,
         SwiftExportDSLConstants.TASK_GROUP,
         envBuildType,
         target
@@ -469,6 +497,23 @@ private fun Project.registerValidateXcodeArchitecturesTask(
     }
 
     return taskProvider
+}
+
+private fun Project.registerValidateSwiftExportDeploymentTargetTask(
+    frameworkTaskName: String,
+    environment: XcodeEnvironment,
+): TaskProvider<ValidateSwiftExportDeploymentTargetTask> {
+    val taskName = lowerCamelCaseName(AppleXcodeTasks.validateDeploymentTargetForTaskPrefix, frameworkTaskName)
+
+    return locateOrRegisterTask<ValidateSwiftExportDeploymentTargetTask>(taskName) { task ->
+        task.description = "Check that the deployment target requested by Xcode is supported by Swift Export"
+        task.deploymentTargetSettingName.set(environment.deploymentTargetSettingName)
+        task.deploymentTarget.set(environment.deploymentTarget)
+        // One Xcode build targets a single platform, so the family of any requested target gives us the minimum
+        task.minimumDeploymentTarget.set(
+            environment.targets.firstOrNull()?.let { SwiftExportConstants.minimumDeploymentTargets[it.family] }
+        )
+    }
 }
 
 private fun Project.checkSandboxAndWriteProtectionTask(

@@ -11,13 +11,18 @@ public protocol _P {
 public protocol __P: KotlinRuntimeSupport._KotlinBridgeable {
 }
 open class Base: KotlinRuntime.KotlinBase {
-    public init() {
-        let __kt = __root___Base_init_allocate()
+    public override init() {
+         let __kt: Swift.UnsafeMutableRawPointer!
+         if Self.self == override.Base.self {
+             __kt = __root___Base_init_allocate()
+         } else {
+             __kt = _kotlinAllocInstanceForSwiftSubclass(Self.self)
+         }
         super.init(__externalRCRefUnsafe: __kt, options: .asBoundBridge);
         { __root___Base_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(__kt); return () }()
     }
     package override init(
-        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer?,
+        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer,
         options: KotlinRuntime.KotlinBaseConstructionOptions
     ) {
         super.init(__externalRCRefUnsafe: __externalRCRefUnsafe, options: options);
@@ -34,12 +39,17 @@ open class Base: KotlinRuntime.KotlinBase {
 }
 open class Sub: override.Base {
     public override init() {
-        let __kt = __root___Sub_init_allocate()
+         let __kt: Swift.UnsafeMutableRawPointer!
+         if Self.self == override.Sub.self {
+             __kt = __root___Sub_init_allocate()
+         } else {
+             __kt = _kotlinAllocInstanceForSwiftSubclass(Self.self)
+         }
         super.init(__externalRCRefUnsafe: __kt, options: .asBoundBridge);
         { __root___Sub_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(__kt); return () }()
     }
     package override init(
-        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer?,
+        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer,
         options: KotlinRuntime.KotlinBaseConstructionOptions
     ) {
         super.init(__externalRCRefUnsafe: __externalRCRefUnsafe, options: options);
@@ -70,7 +80,7 @@ extension KotlinRuntimeSupport._KotlinExistentialPenBox: override._P {
 }
 @_cdecl("Base_g__TypesOfArguments__anyU20override_P____reverse_swift")
 package func Base_g__TypesOfArguments__anyU20override_P____reverse_swift(_ `self`: Swift.UnsafeMutableRawPointer, _ x: Swift.UnsafeMutableRawPointer) -> Swift.Bool {
-    let _self = override.Base.__createClassWrapper(externalRCRef: `self`)!
+    let _self = override.Base.__createClassWrapper(externalRCRef: `self`)
     let _result: Swift.Void = _self.g(x: KotlinRuntime.KotlinBase.__createProtocolWrapper(externalRCRef: x, conformsTo: override.P.Type.self) as! any override.P)
     return { _result; return true }()
 }
@@ -84,7 +94,7 @@ package func P_f__reverse_swift(_ `self`: Swift.UnsafeMutableRawPointer) -> Swif
 
 @_cdecl("Sub_g__TypesOfArguments__anyU20override_P____reverse_swift")
 package func Sub_g__TypesOfArguments__anyU20override_P____reverse_swift(_ `self`: Swift.UnsafeMutableRawPointer, _ x: Swift.UnsafeMutableRawPointer) -> Swift.Bool {
-    let _self = override.Sub.__createClassWrapper(externalRCRef: `self`)!
+    let _self = override.Sub.__createClassWrapper(externalRCRef: `self`)
     let _result: Swift.Void = _self.g(x: KotlinRuntime.KotlinBase.__createProtocolWrapper(externalRCRef: x, conformsTo: override.P.Type.self) as! any override.P)
     return { _result; return true }()
 }

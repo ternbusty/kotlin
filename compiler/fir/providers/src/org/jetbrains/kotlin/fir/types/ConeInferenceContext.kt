@@ -133,6 +133,11 @@ interface ConeInferenceContext : TypeSystemInferenceExtensionContext, ConeTypeCo
             } else {
                 constructor.mapTypes { it.withAttributes(coneAttributes) }
             }
+            is ConeUnionType -> if (coneAttributes === constructor.attributes) {
+                constructor
+            } else {
+                constructor.withAttributes(coneAttributes)
+            }
             is ConeCapturedTypeConstructor,
             is ConeIntegerLiteralType,
             is ConeStubTypeConstructor,
@@ -442,6 +447,12 @@ interface ConeInferenceContext : TypeSystemInferenceExtensionContext, ConeTypeCo
         return this.substituteOrSelf(type)
     }
 
+    override fun TypeSubstitutorMarker.substituteOrNull(type: KotlinTypeMarker): KotlinTypeMarker? {
+        require(this is ConeSubstitutor)
+        require(type is ConeKotlinType)
+        return this.substituteOrNull(type)
+    }
+
     override fun TypeVariableMarker.defaultType(): ConeTypeVariableType {
         require(this is ConeTypeVariable)
         return this.defaultType
@@ -691,14 +702,6 @@ interface ConeInferenceContext : TypeSystemInferenceExtensionContext, ConeTypeCo
     override fun RigidTypeMarker.getUpperBoundForApproximationOfIntersectionType(): ConeKotlinType? {
         return (this as? ConeIntersectionType)?.upperBoundForApproximation
     }
-
-    override fun usePreciseSimplificationToFlexibleLowerConstraint(): Boolean = session.languageVersionSettings.supportsFeature(
-        LanguageFeature.PreciseSimplificationToFlexibleLowerConstraint
-    )
-
-    override fun simplifyFlexibleUpperConstraintWithDnnBoundToNullable(): Boolean = !session.languageVersionSettings.supportsFeature(
-        LanguageFeature.DisableSimplificationOfFlexibleUpperConstraintWithDnnLowerBound
-    )
 
     override fun KotlinTypeMarker.convertToNonRaw(): ConeKotlinType {
         require(this is ConeKotlinType)

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2024 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
@@ -70,9 +70,17 @@ object PerformanceNotifications {
     object IrSerializationStarted : AbstractNotification(PhaseType.IrSerialization, start = true)
     object IrSerializationFinished : AbstractNotification(PhaseType.IrSerialization, start = false)
 
+    // klib metadata writing.
+    object KlibMetadataWritingStarted : AbstractNotification(PhaseType.KlibMetadataWriting, start = true)
+    object KlibMetadataWritingFinished : AbstractNotification(PhaseType.KlibMetadataWriting, start = false)
+
     // klib writing
     object KlibWritingStarted : AbstractNotification(PhaseType.KlibWriting, start = true)
     object KlibWritingFinished : AbstractNotification(PhaseType.KlibWriting, start = false)
+
+    // IR linking
+    object IrLinkingStarted : AbstractNotification(PhaseType.IrLinking, start = true)
+    object IrLinkingFinished : AbstractNotification(PhaseType.IrLinking, start = false)
 
     // backend lowerings
     object IrLoweringStarted : AbstractNotification(PhaseType.IrLowering, start = true)

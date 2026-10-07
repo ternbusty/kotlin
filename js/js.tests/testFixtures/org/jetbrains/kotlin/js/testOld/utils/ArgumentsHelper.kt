@@ -5,6 +5,7 @@
 package org.jetbrains.kotlin.js.testOld.utils
 
 import org.jetbrains.kotlin.test.TargetBackend
+import kotlin.properties.ReadOnlyProperty
 
 /**
  * Arguments format: `((namedArg|positionalArg)\s+)*`
@@ -15,7 +16,7 @@ import org.jetbrains.kotlin.test.TargetBackend
  *
  * Neither key, nor value should contain spaces.
  */
-class ArgumentsHelper(private val entry: String) {
+open class ArgumentsHelper(private val entry: String) {
     companion object {
         private val argumentsPattern = Regex($$"""[\w$_;.]+(=((".*?")|[\w$_;.]+))?""")
     }
@@ -47,6 +48,16 @@ class ArgumentsHelper(private val entry: String) {
     private val ignoredBackends: Set<TargetBackend> =
         findNamedListArgument("IGNORED_BACKENDS").mapTo(hashSetOf(), TargetBackend::valueOf)
 
+    /**
+     * Names of directives that MUST be registered for this to be evaluated.
+     */
+    val targetModes: Set<String> = findNamedListArgument("TARGET_MODES").toSet()
+
+    /**
+     * Names of directives that MUST NOT be registered for this to be evaluated.
+     */
+    val ignoredModes: Set<String> = findNamedListArgument("IGNORED_MODES").toSet()
+
     fun shouldRunWithBackend(backend: TargetBackend): Boolean {
         if (targetBackends.isNotEmpty()) {
             return backend in targetBackends
@@ -74,4 +85,31 @@ class ArgumentsHelper(private val entry: String) {
     }
 
     override fun toString(): String = entry
+
+    protected fun positional(index: Int): ReadOnlyProperty<ArgumentsHelper, String> =
+        { arguments, _ -> arguments.getPositionalArgument(index) }
+
+    protected fun list(argumentName: String? = null): ReadOnlyProperty<ArgumentsHelper, List<String>> =
+        { arguments, prop -> arguments.findNamedListArgument(argumentName ?: prop.name) }
+
+    protected fun set(argumentName: String? = null): ReadOnlyProperty<ArgumentsHelper, Set<String>> =
+        { arguments, prop -> arguments.findNamedListArgument(argumentName ?: prop.name).toSet() }
+
+    protected fun required(argumentName: String? = null): ReadOnlyProperty<ArgumentsHelper, String> =
+        { arguments, prop ->
+            val name = argumentName ?: prop.name
+            requireNotNull(arguments.findNamedArgument(name)) { "Required argument `$name` not found in entry '$entry'" }
+        }
+
+    protected fun requiredInt(argumentName: String? = null): ReadOnlyProperty<ArgumentsHelper, Int> =
+        { arguments, prop -> arguments.getNamedArgument(argumentName ?: prop.name).toInt() }
+
+    protected fun optionalInt(argumentName: String? = null): ReadOnlyProperty<ArgumentsHelper, Int?> =
+        { arguments, prop -> arguments.findNamedArgument(argumentName ?: prop.name)?.toInt() }
+
+    protected fun optional(argumentName: String? = null): ReadOnlyProperty<ArgumentsHelper, String?> =
+        { arguments, prop -> arguments.findNamedArgument(argumentName ?: prop.name) }
+
+    protected fun boolean(argumentName: String? = null, defaultValue: Boolean = false): ReadOnlyProperty<ArgumentsHelper, Boolean> =
+        { arguments, prop -> arguments.findNamedArgument(argumentName ?: prop.name)?.toBoolean() ?: defaultValue }
 }

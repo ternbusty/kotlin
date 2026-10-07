@@ -24,7 +24,10 @@ import kotlin.test.fail
 
 
 // TODO: KT-70416 :resolveIdeDependencies doesn't support Configuration Cache & Project Isolation
-private fun BuildOptions.disableConfigurationCache_KT70416() = copy(configurationCache = BuildOptions.ConfigurationCacheValue.DISABLED)
+internal fun BuildOptions.disableConfigurationCache_KT70416() = copy(
+    configurationCache = BuildOptions.ConfigurationCacheValue.DISABLED,
+    isolatedProjects = BuildOptions.IsolatedProjectsMode.DISABLED,
+)
 
 /* Test Utils / Test Infrastructure Implementation */
 
@@ -76,8 +79,9 @@ private class ResolveIdeDependenciesModelImpl(
 internal fun TestProject.resolveIdeDependenciesAsModel(
     sourceSets: Set<String>,
     buildOptions: BuildOptions = this.buildOptions,
+    tasks: List<String> = listOf("prepareKotlinIdeaImport"),
 ): IdeaKotlinDependenciesContainer {
-    val model = buildModel<ResolveIdeDependenciesModel>("prepareKotlinIdeaImport", buildOptions = buildOptions) { project ->
+    val model = buildModel<ResolveIdeDependenciesModel>(*tasks.toTypedArray(), buildOptions = buildOptions) { project ->
         val deps = sourceSets.associateWith {
             @OptIn(ExternalKotlinTargetApi::class)
             project.kotlinIdeMultiplatformImport.resolveDependenciesSerialized(it)
@@ -85,7 +89,7 @@ internal fun TestProject.resolveIdeDependenciesAsModel(
         ResolveIdeDependenciesModelImpl(deps)
     }
 
-    val deserializedDependencies = model.dependencies.mapValues { [sourceSet, serializedDependencies] ->
+    val deserializedDependencies = model.dependencies.mapValues { (sourceSet, serializedDependencies) ->
         serializedDependencies.map { bytes ->
             GradleIntegrationTestIdeaKotlinSerializationContext.IdeaKotlinDependency(bytes)
                 ?: fail("Failed to deserialize dependency on source set $sourceSet:")
@@ -118,7 +122,7 @@ class IdeaKotlinDependenciesContainer(
         ?: fail("SourceSet with name $sourceSetName not found. Found: ${dependencies.keys}")
 
     fun assertResolvedDependenciesOnly() {
-        dependencies.entries.forEach { [sourceSet, sourceSetDependencies] ->
+        dependencies.entries.forEach { (sourceSet, sourceSetDependencies) ->
             sourceSetDependencies.assertResolvedDependenciesOnly("Unexpected unresolved dependencies for $sourceSet:")
         }
     }

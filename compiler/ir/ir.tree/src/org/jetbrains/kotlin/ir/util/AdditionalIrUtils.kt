@@ -146,6 +146,20 @@ fun IrAnnotation.isAnnotationWithEqualFqName(fqName: FqName): Boolean = when {
 
 val IrAnnotation.classId: ClassId get() = classSymbol.classIdWhenAvailable!!
 
+fun IrClass.hasEqualClassId(classId: ClassId): Boolean {
+    fun compare(declaration: IrDeclarationWithName, packageFqName: FqName, relativeName: FqName): Boolean {
+        if (declaration.name != relativeName.shortName()) return false
+        val relativeParent = relativeName.parent()
+        return when (val parent = declaration.parent) {
+            is IrPackageFragment -> parent.packageFqName == packageFqName && relativeParent.isRoot
+            is IrClass -> !relativeParent.isRoot && compare(parent, packageFqName, relativeParent)
+            else -> false
+        }
+    }
+
+    return compare(this, classId.packageFqName, classId.relativeClassName)
+}
+
 val IrClass.packageFqName: FqName?
     get() = symbol.signature?.packageFqName() ?: parent.getPackageFragment()?.packageFqName
 
@@ -177,12 +191,6 @@ fun IrSymbol.hasTopLevelEqualFqName(packageName: String, declarationName: String
     return with(signature as? IdSignature.CommonSignature ?: return false) {
         // optimized version of FqName("$packageFqName.$declarationFqName") == fqName
         packageFqName == packageName && declarationFqName == declarationName
-    }
-}
-
-fun IrClassSymbol.hasEqualClassId(classId: ClassId): Boolean {
-    return with(signature as? IdSignature.CommonSignature ?: return false) {
-        classId.packageFqName.asString() == packageFqName && classId.relativeClassName.asString() == declarationFqName
     }
 }
 
@@ -417,6 +425,19 @@ inline fun <reified T> IrAnnotation.getConstArgument(name: String): T? {
     val expression = argumentMapping[Name.identifier(name)] as? IrConst
     return expression?.value as? T
 }
+
+private val reflectionPackageNameFqName = StandardClassIds.Annotations.ReflectionPackageName.asSingleFqName()
+
+/**
+ * The package name that should be reported in the reflective information of the classes declared in this file
+ * instead of the real package name, or `null` if the file is not annotated with `@kotlin.internal.ReflectionPackageName`.
+ *
+ * The test infrastructure uses that annotation to compensate for the package renaming it performs when compiling
+ * several tests into one batch. Backends supporting reflective information are expected to respect it, so that
+ * the renaming does not affect the observable fully qualified names.
+ */
+val IrFile.reflectionPackageName: String?
+    get() = getAnnotation(reflectionPackageNameFqName)?.getConstArgument("name")
 
 val IrBlock.singleExpressionOrNull get() = statements.singleOrNull() as? IrExpression
 

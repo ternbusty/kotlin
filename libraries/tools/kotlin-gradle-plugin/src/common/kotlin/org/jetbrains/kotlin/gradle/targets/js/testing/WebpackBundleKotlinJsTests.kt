@@ -14,23 +14,17 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ProviderFactory
-import org.gradle.api.tasks.CacheableTask
-import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputFile
-import org.gradle.api.tasks.Internal
-import org.gradle.api.tasks.OutputDirectory
-import org.gradle.api.tasks.OutputFile
-import org.gradle.api.tasks.PathSensitive
-import org.gradle.api.tasks.PathSensitivity
-import org.gradle.api.tasks.TaskAction
-import org.gradle.api.tasks.TaskProvider
+import org.gradle.api.tasks.*
 import org.gradle.process.ExecOperations
+import org.jetbrains.kotlin.gradle.ExperimentalNodeJsToolchainDsl
+import org.jetbrains.kotlin.gradle.dsl.toolchain.nodejs.NodeJsRequest
 import org.jetbrains.kotlin.gradle.targets.js.NpmVersions
 import org.jetbrains.kotlin.gradle.targets.js.RequiredKotlinJsDependency
 import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinJsBinaryMode
 import org.jetbrains.kotlin.gradle.targets.js.dsl.WebpackRulesDsl.Companion.webpackRulesContainer
 import org.jetbrains.kotlin.gradle.targets.js.internal.jsQuoted
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrCompilation
+import org.jetbrains.kotlin.gradle.targets.js.ir.dependsOnNpmTooling
 import org.jetbrains.kotlin.gradle.targets.js.ir.nodeJsRoot
 import org.jetbrains.kotlin.gradle.targets.js.ir.npmToolingDir
 import org.jetbrains.kotlin.gradle.targets.js.npm.NpmProjectModules
@@ -40,18 +34,23 @@ import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackOutput
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackRunner
 import org.jetbrains.kotlin.gradle.targets.wasm.internal.isWasm
-import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootExtension
-import org.jetbrains.kotlin.gradle.targets.web.nodejs.nodeJsEnvSpec
+import org.jetbrains.kotlin.gradle.targets.web.nodejs.toolchain.requestDefaultNodeJs
+import org.jetbrains.kotlin.gradle.targets.web.nodejs.toolchain.resolveNodeJsExecutable
 import org.jetbrains.kotlin.gradle.tasks.locateOrRegisterTask
+import org.jetbrains.kotlin.gradle.tasks.nodejs.UsesNodeJsToolchainService
 import org.jetbrains.kotlin.gradle.utils.getFile
 import org.jetbrains.kotlin.gradle.utils.property
 import org.jetbrains.kotlin.gradle.utils.propertyWithConvention
 import java.io.IOException
+import java.nio.file.Path
 import javax.inject.Inject
 import kotlin.io.path.Path
+import kotlin.io.path.copyTo
+import kotlin.io.path.name
 import kotlin.io.path.readText
 
 @CacheableTask
+@OptIn(ExperimentalNodeJsToolchainDsl::class)
 internal abstract class WebpackBundleKotlinJsTests
 @Inject
 constructor(
@@ -61,10 +60,13 @@ constructor(
     private val objects: ObjectFactory,
     private val providers: ProviderFactory,
     private val execOps: ExecOperations,
-) : DefaultTask(), RequiresNpmDependenciesTask {
+) : DefaultTask(), RequiresNpmDependenciesTask, UsesNodeJsToolchainService {
 
     private val npmProject = compilation.npmProject
     private val npmProjectDir: Provider<Directory> = npmProject.dir
+
+    @get:Input
+    internal val nodeJsRequest: Provider<NodeJsRequest> = compilation.project.requestDefaultNodeJs()
 
     /** This flag prevents from installing NPM dependencies that not going to be used.
      * i.e. task is registered but wasn't requested for execution.
@@ -130,7 +132,7 @@ constructor(
                 versions.webpackCli,
                 versions.sourceMapLoader,
                 versions.kotlinWebHelpers,
-                // TODO: KT-86683 Add mocha as npm dependency instead of URL
+                versions.mocha,
             )
         }
 
@@ -141,6 +143,7 @@ constructor(
 
         val runnerModule = modules.require("kotlin-web-helpers/dist/kotlin-test-mocha-browser-runner.js")
         val staticHtml = modules.require("kotlin-web-helpers/dist/static/test.html")
+        val mochaAssets = modules.resolveMochaBrowserAssets()
         modules.require("playwright-core")
 
 
@@ -164,7 +167,6 @@ constructor(
 
         // FIXME: KT-86694 we don't actually need to bundle it, just fix 'format-util' bundling on kotlin-web-utils side
         config.extraJs += "config.entry.kotlinTestRunner = ${runnerModule.jsQuoted()}"
-        // FIXME: KT-86683 add mocha as npm dependency
         config.extraJs += """config.externals = { "mocha": "Mocha" }"""
 
         if (isWasm) {
@@ -174,7 +176,7 @@ constructor(
         val runner = KotlinWebpackRunner(
             name = name,
             npmProjectDir = npmProject.dir.get().asFile,
-            nodeExecutable = npmProject.nodeExecutable,
+            nodeExecutable = nodeJsToolchainService.get().resolveNodeJsExecutable(npmProject, nodeJsRequest),
             logger = logger,
             configFile = webpackConfigFile.get().asFile,
             tool = "webpack/bin/webpack.js",
@@ -189,8 +191,16 @@ constructor(
 
         runner.execute()
 
-        // Write should happen after webpack build, because of 'clean' policy
+        copyMochaBrowserAssets(mochaAssets)
+        // Writes should happen after webpack build, because of 'clean' policy
         writeTestHtmlFile(staticHtml)
+    }
+
+    private fun copyMochaBrowserAssets(assets: List<Path>) {
+        val outputDir = outputBundleDir.get().asFile.toPath()
+        assets.forEach { asset ->
+            asset.copyTo(outputDir.resolve(asset.name), overwrite = true)
+        }
     }
 
     private fun writeTestHtmlFile(staticHtmlPath: String) {
@@ -201,13 +211,36 @@ constructor(
             throw IllegalArgumentException("'$staticHtmlPath' file can't be loaded ", e)
         }
 
+        val patchedHtml = replaceMochaCdnReferences(html)
+        if (patchedHtml == null) {
+            logger.warn(
+                "Could not find mocha CDN references in '$staticHtmlPath', " +
+                        "mocha will be loaded over HTTP during browser tests"
+            )
+        }
+
         val output = outputBundleDir.get().asFile.resolve(TEST_HTML_FILE_NAME)
-        output.writeText(html)
+        output.writeText(patchedHtml ?: html)
     }
 
     companion object {
         private const val TEST_HTML_FILE_NAME = "test.html"
     }
+}
+
+private val MOCHA_ASSET_FILE_NAMES = listOf("mocha.js", "mocha.css")
+
+private const val MOCHA_SOURCE_MAP_FILE_NAME = "mocha.js.map"
+
+private val MOCHA_CDN_URL = Regex("""https://unpkg\.com/mocha(?:@[^/"']+)?/(mocha\.(?:js|css))""")
+
+internal fun replaceMochaCdnReferences(html: String): String? =
+    if (MOCHA_CDN_URL.containsMatchIn(html)) MOCHA_CDN_URL.replace(html, "$1") else null
+
+private fun NpmProjectModules.resolveMochaBrowserAssets(): List<Path> {
+    val assets = MOCHA_ASSET_FILE_NAMES.map { Path(require("mocha/$it")) }
+    val sourceMap = resolve("mocha/$MOCHA_SOURCE_MAP_FILE_NAME")?.toPath()
+    return assets + listOfNotNull(sourceMap)
 }
 
 internal fun KotlinJsIrCompilation.locateOrRegisterBrowserTestBundleTask(
@@ -223,22 +256,11 @@ internal fun KotlinJsIrCompilation.locateOrRegisterBrowserTestBundleTask(
         val compilation = this@locateOrRegisterBrowserTestBundleTask
 
         val nodeJsRoot = compilation.nodeJsRoot()
-        val nodeJsEnvSpec = compilation.nodeJsEnvSpec
-
         task.versions.value(nodeJsRoot.versions).disallowChanges()
 
-        with(nodeJsEnvSpec) {
-            task.dependsOn(project.nodeJsSetupTaskProvider)
-        }
-
-        task.dependsOn(nodeJsRoot.npmInstallTaskProvider)
-        task.dependsOn(nodeJsRoot.packageManagerExtension.map { it.postInstallTasks })
-
-        if (compilation.isWasm) {
-            task.dependsOn((nodeJsRoot as WasmNodeJsRootExtension).toolingInstallTaskProvider)
-        }
         task.npmToolingEnvDir.set(compilation.npmToolingDir())
         task.npmToolingEnvDir.disallowChanges()
+        task.dependsOnNpmTooling(compilation)
 
         val binary = compilation.binaries.getIrBinaries(
             KotlinJsBinaryMode.DEVELOPMENT

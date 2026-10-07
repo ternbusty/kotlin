@@ -791,6 +791,48 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
   }
 
   @Test
+  @TestMetadata("lambdaInsideAnnotationArgument.kt")
+  public void testLambdaInsideAnnotationArgument() {
+    run("lambdaInsideAnnotationArgument.kt");
+  }
+
+  @Test
+  @TestMetadata("lambdaInsideAnnotationArgumentScript.kts")
+  public void testLambdaInsideAnnotationArgumentScript() {
+    run("lambdaInsideAnnotationArgumentScript.kts");
+  }
+
+  @Test
+  @TestMetadata("lambdaInsideDestructuringAnnotationScript.kts")
+  public void testLambdaInsideDestructuringAnnotationScript() {
+    run("lambdaInsideDestructuringAnnotationScript.kts");
+  }
+
+  @Test
+  @TestMetadata("lambdaInsideForeignTypeAnnotation.kt")
+  public void testLambdaInsideForeignTypeAnnotation() {
+    run("lambdaInsideForeignTypeAnnotation.kt");
+  }
+
+  @Test
+  @TestMetadata("lambdaInsideForeignTypeAnnotationScript.kts")
+  public void testLambdaInsideForeignTypeAnnotationScript() {
+    run("lambdaInsideForeignTypeAnnotationScript.kts");
+  }
+
+  @Test
+  @TestMetadata("lambdaInsideLocalForeignTypeAnnotation.kt")
+  public void testLambdaInsideLocalForeignTypeAnnotation() {
+    run("lambdaInsideLocalForeignTypeAnnotation.kt");
+  }
+
+  @Test
+  @TestMetadata("lambdaInsideLocalForeignTypeAnnotationScript.kts")
+  public void testLambdaInsideLocalForeignTypeAnnotationScript() {
+    run("lambdaInsideLocalForeignTypeAnnotationScript.kts");
+  }
+
+  @Test
   @TestMetadata("lastStatementWithDestructuringDeclarationReference.kts")
   public void testLastStatementWithDestructuringDeclarationReference() {
     run("lastStatementWithDestructuringDeclarationReference.kts");
@@ -914,6 +956,18 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
   @TestMetadata("localParameterInsideSuperEntryCallScript.kts")
   public void testLocalParameterInsideSuperEntryCallScript() {
     run("localParameterInsideSuperEntryCallScript.kts");
+  }
+
+  @Test
+  @TestMetadata("namedFunctionInsideClassAnnotation.kt")
+  public void testNamedFunctionInsideClassAnnotation() {
+    run("namedFunctionInsideClassAnnotation.kt");
+  }
+
+  @Test
+  @TestMetadata("namedFunctionInsideFileAnnotation.kt")
+  public void testNamedFunctionInsideFileAnnotation() {
+    run("namedFunctionInsideFileAnnotation.kt");
   }
 
   @Test
@@ -1452,6 +1506,12 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
     }
 
     @Test
+    @TestMetadata("compilerRequiredAliased.kt")
+    public void testCompilerRequiredAliased() {
+      run("compilerRequiredAliased.kt");
+    }
+
+    @Test
     @TestMetadata("constructorProperty_all.kt")
     public void testConstructorProperty_all() {
       run("constructorProperty_all.kt");
@@ -1491,6 +1551,12 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
     @TestMetadata("intrinsicConstOnIncorrectProperty.kt")
     public void testIntrinsicConstOnIncorrectProperty() {
       run("intrinsicConstOnIncorrectProperty.kt");
+    }
+
+    @Test
+    @TestMetadata("targetWithContextSensitive.kt")
+    public void testTargetWithContextSensitive() {
+      run("targetWithContextSensitive.kt");
     }
 
     @Test
@@ -2072,6 +2138,170 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
         run("propertyTypeCollisionScript.kts");
       }
     }
+
+    @Nested
+    @TestMetadata("analysis/low-level-api-fir/testData/lazyResolve/classes/fullValueClasses")
+    @TestDataPath("$PROJECT_ROOT")
+    public class FullValueClasses {
+      private void run(String fileName) {
+        runTest("analysis/low-level-api-fir/testData/lazyResolve/classes/fullValueClasses/" + fileName);
+      }
+
+      @Test
+      public void testAllFilesPresentInFullValueClasses() {
+        KtTestUtil.assertAllTestsPresentByMetadataWithExcluded(this.getClass(), new File("analysis/low-level-api-fir/testData/lazyResolve/classes/fullValueClasses"), Pattern.compile("^(.+)\\.(kt|kts)$"), null, true);
+      }
+
+      @Test
+      @TestMetadata("fullValueClass.kt")
+      public void testFullValueClass() {
+        run("fullValueClass.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassAbstract.kt")
+      public void testFullValueClassAbstract() {
+        run("fullValueClassAbstract.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassBodyProperty.kt")
+      public void testFullValueClassBodyProperty() {
+        run("fullValueClassBodyProperty.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassCustomEquals.kt")
+      public void testFullValueClassCustomEquals() {
+        run("fullValueClassCustomEquals.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassFeatureDisabled.kt")
+      public void testFullValueClassFeatureDisabled() {
+        run("fullValueClassFeatureDisabled.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassGeneric.kt")
+      public void testFullValueClassGeneric() {
+        run("fullValueClassGeneric.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassMemberFunction.kt")
+      public void testFullValueClassMemberFunction() {
+        run("fullValueClassMemberFunction.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassNoFields.kt")
+      public void testFullValueClassNoFields() {
+        run("fullValueClassNoFields.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassParameterTypeCollision.kt")
+      public void testFullValueClassParameterTypeCollision() {
+        run("fullValueClassParameterTypeCollision.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassRecursive.kt")
+      public void testFullValueClassRecursive() {
+        run("fullValueClassRecursive.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassRecursive2.kt")
+      public void testFullValueClassRecursive2() {
+        run("fullValueClassRecursive2.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassScript.kts")
+      public void testFullValueClassScript() {
+        run("fullValueClassScript.kts");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassSealed.kt")
+      public void testFullValueClassSealed() {
+        run("fullValueClassSealed.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassSecondaryConstructor.kt")
+      public void testFullValueClassSecondaryConstructor() {
+        run("fullValueClassSecondaryConstructor.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassSyntheticEquals.kt")
+      public void testFullValueClassSyntheticEquals() {
+        run("fullValueClassSyntheticEquals.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassSyntheticHashCode.kt")
+      public void testFullValueClassSyntheticHashCode() {
+        run("fullValueClassSyntheticHashCode.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassSyntheticToString.kt")
+      public void testFullValueClassSyntheticToString() {
+        run("fullValueClassSyntheticToString.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassWithAnotherFullValueClass.kt")
+      public void testFullValueClassWithAnotherFullValueClass() {
+        run("fullValueClassWithAnotherFullValueClass.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassWithDelegation.kt")
+      public void testFullValueClassWithDelegation() {
+        run("fullValueClassWithDelegation.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassWithInit.kt")
+      public void testFullValueClassWithInit() {
+        run("fullValueClassWithInit.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassWithInlineClassProperty.kt")
+      public void testFullValueClassWithInlineClassProperty() {
+        run("fullValueClassWithInlineClassProperty.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassWithSuperClass.kt")
+      public void testFullValueClassWithSuperClass() {
+        run("fullValueClassWithSuperClass.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassWithTypeAlias.kt")
+      public void testFullValueClassWithTypeAlias() {
+        run("fullValueClassWithTypeAlias.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueObject.kt")
+      public void testFullValueObject() {
+        run("fullValueObject.kt");
+      }
+
+      @Test
+      @TestMetadata("inlineClassWithFullValueClassesEnabled.kt")
+      public void testInlineClassWithFullValueClassesEnabled() {
+        run("inlineClassWithFullValueClassesEnabled.kt");
+      }
+    }
   }
 
   @Nested
@@ -2189,6 +2419,12 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
       }
 
       @Test
+      @TestMetadata("fullValueClassSyntheticEquals.kt")
+      public void testFullValueClassSyntheticEquals() {
+        run("fullValueClassSyntheticEquals.kt");
+      }
+
+      @Test
       @TestMetadata("functionInsideUnnamedObject.kt")
       public void testFunctionInsideUnnamedObject() {
         run("functionInsideUnnamedObject.kt");
@@ -2236,6 +2472,12 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
       @TestMetadata("changePackage.kt")
       public void testChangePackage() {
         run("changePackage.kt");
+      }
+
+      @Test
+      @TestMetadata("fullValueClassSyntheticEquals.kt")
+      public void testFullValueClassSyntheticEquals() {
+        run("fullValueClassSyntheticEquals.kt");
       }
 
       @Test
@@ -2977,6 +3219,18 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
     @TestMetadata("explicitBackingField.kt")
     public void testExplicitBackingField() {
       run("explicitBackingField.kt");
+    }
+
+    @Test
+    @TestMetadata("explicitBackingFieldScript.kts")
+    public void testExplicitBackingFieldScript() {
+      run("explicitBackingFieldScript.kts");
+    }
+
+    @Test
+    @TestMetadata("explicitBackingFieldWithImplicitType.kt")
+    public void testExplicitBackingFieldWithImplicitType() {
+      run("explicitBackingFieldWithImplicitType.kt");
     }
 
     @Test
@@ -3988,6 +4242,12 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
     }
 
     @Test
+    @TestMetadata("fullValueClassWithSuper.kt")
+    public void testFullValueClassWithSuper() {
+      run("fullValueClassWithSuper.kt");
+    }
+
+    @Test
     @TestMetadata("nonEmptyClassWithSuper.kt")
     public void testNonEmptyClassWithSuper() {
       run("nonEmptyClassWithSuper.kt");
@@ -4059,6 +4319,12 @@ public class FirSourceLikeLazyDeclarationResolveTestGenerated extends AbstractFi
     @TestMetadata("annotation.kt")
     public void testAnnotation() {
       run("annotation.kt");
+    }
+
+    @Test
+    @TestMetadata("cyclicAliasedAnnotation.kt")
+    public void testCyclicAliasedAnnotation() {
+      run("cyclicAliasedAnnotation.kt");
     }
 
     @Test

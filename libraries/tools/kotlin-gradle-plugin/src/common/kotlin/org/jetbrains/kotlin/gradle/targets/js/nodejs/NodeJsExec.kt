@@ -13,24 +13,29 @@ import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.*
 import org.gradle.work.DisableCachingByDefault
 import org.gradle.work.NormalizeLineEndings
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinJsCompilation
+import org.jetbrains.kotlin.gradle.ExperimentalNodeJsToolchainDsl
 import org.jetbrains.kotlin.gradle.targets.js.KotlinWasmTargetType
 import org.jetbrains.kotlin.gradle.targets.js.NpmVersions
 import org.jetbrains.kotlin.gradle.targets.js.RequiredKotlinJsDependency
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrCompilation
+import org.jetbrains.kotlin.gradle.targets.js.ir.dependsOnNpmTooling
 import org.jetbrains.kotlin.gradle.targets.js.ir.nodeJsRoot
 import org.jetbrains.kotlin.gradle.targets.js.ir.npmToolingDir
 import org.jetbrains.kotlin.gradle.targets.js.npm.NpmProjectModules
 import org.jetbrains.kotlin.gradle.targets.js.npm.RequiresNpmDependenciesTask
 import org.jetbrains.kotlin.gradle.targets.js.npm.npmProject
-import org.jetbrains.kotlin.gradle.targets.wasm.internal.isWasm
-import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootExtension
 import org.jetbrains.kotlin.gradle.targets.web.nodejs.nodeJsEnvSpec
+import org.jetbrains.kotlin.gradle.dsl.toolchain.nodejs.NodeJsRequest
+import org.jetbrains.kotlin.gradle.targets.web.nodejs.toolchain.legacyNodeJsExecutable
+import org.jetbrains.kotlin.gradle.targets.web.nodejs.toolchain.requestDefaultNodeJs
+import org.jetbrains.kotlin.gradle.targets.web.nodejs.toolchain.resolveNodeJsExecutable
+import org.jetbrains.kotlin.gradle.tasks.nodejs.UsesNodeJsToolchainService
 import org.jetbrains.kotlin.gradle.tasks.registerTask
 import org.jetbrains.kotlin.gradle.utils.getFile
 import org.jetbrains.kotlin.gradle.utils.newFileProperty
 import javax.inject.Inject
 
+@OptIn(ExperimentalNodeJsToolchainDsl::class)
 @DisableCachingByDefault
 abstract class NodeJsExec
 @Inject
@@ -38,13 +43,20 @@ constructor(
     @Internal
     @Transient
     final override val compilation: KotlinJsIrCompilation,
-) : AbstractExecTask<NodeJsExec>(NodeJsExec::class.java), RequiresNpmDependenciesTask {
+) : AbstractExecTask<NodeJsExec>(NodeJsExec::class.java), RequiresNpmDependenciesTask, UsesNodeJsToolchainService {
 
     @get:Internal
     internal abstract val versions: Property<NpmVersions>
 
     @Internal
     val npmProject = compilation.npmProject
+
+    @get:Input
+    @get:Optional
+    internal val nodeExecutable: Provider<String> = nodeJsToolchainService.legacyNodeJsExecutable(project.objects, compilation)
+
+    @get:Input
+    internal val nodeJsRequest: Provider<NodeJsRequest> = project.requestDefaultNodeJs()
 
     init {
         this.onlyIf {
@@ -79,6 +91,9 @@ constructor(
             }
 
     override fun exec() {
+        // Resolved at execution time, because it may provision Node.js
+        executable = nodeJsToolchainService.get().resolveNodeJsExecutable(nodeExecutable, nodeJsRequest)
+
         val newArgs = mutableListOf<String>()
         newArgs.addAll(nodeArgs)
         if (inputFileProperty.isPresent) {
@@ -115,6 +130,8 @@ constructor(
             val project = target.project
 
             val nodeJsRoot = compilation.nodeJsRoot()
+
+            @Suppress("DEPRECATION")
             val nodeJsEnvSpec = compilation.nodeJsEnvSpec
 
             val npmProject = compilation.npmProject
@@ -126,17 +143,9 @@ constructor(
             ) {
                 it.versions.value(nodeJsRoot.versions)
                     .disallowChanges()
-                it.executable = nodeJsEnvSpec.executable.get()
                 if (compilation.target.wasmTargetType != KotlinWasmTargetType.WASI) {
                     it.workingDir(npmProject.dir)
-                    it.dependsOn(
-                        nodeJsRoot.npmInstallTaskProvider,
-                    )
-                    it.dependsOn(nodeJsRoot.packageManagerExtension.map { it.postInstallTasks })
-
-                    if (compilation.isWasm) {
-                        it.dependsOn((nodeJsRoot as WasmNodeJsRootExtension).toolingInstallTaskProvider)
-                    }
+                    it.dependsOnNpmTooling(compilation)
                 }
 
                 it.npmToolingEnvDir.set(npmToolingDir)
@@ -149,34 +158,5 @@ constructor(
                 it.configuration()
             }
         }
-
-        @Deprecated(
-            "Use create(KotlinJsIrCompilation, name, configuration). Scheduled for removal in Kotlin 2.5.",
-            replaceWith = ReplaceWith("create(compilation, name, configuration)"),
-            // KT-85179 Used by kotlinx-benchmark https://github.com/Kotlin/kotlinx-benchmark/issues/355
-            level = DeprecationLevel.HIDDEN
-        )
-        fun create(
-            compilation: KotlinJsCompilation,
-            name: String,
-            configuration: NodeJsExec.() -> Unit = {},
-        ): TaskProvider<NodeJsExec> =
-            register(
-                compilation as KotlinJsIrCompilation,
-                name,
-                configuration
-            )
-
-        @Deprecated(
-            "Use register instead. Scheduled for removal in Kotlin 2.5.",
-            ReplaceWith("register(compilation, name, configuration)"),
-            level = DeprecationLevel.HIDDEN
-            // KT-85179 Used by kotlinx-benchmark https://github.com/Kotlin/kotlinx-benchmark/issues/355
-        )
-        fun create(
-            compilation: KotlinJsIrCompilation,
-            name: String,
-            configuration: NodeJsExec.() -> Unit = {},
-        ): TaskProvider<NodeJsExec> = register(compilation, name, configuration)
     }
 }

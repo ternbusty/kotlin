@@ -6,31 +6,49 @@
 package org.jetbrains.kotlin.lombok.checkers
 
 import org.jetbrains.kotlin.KtFakeSourceElementKind
+import org.jetbrains.kotlin.KtRealSourceElementKind
 import org.jetbrains.kotlin.diagnostics.DiagnosticReporter
 import org.jetbrains.kotlin.diagnostics.reportOn
+import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.analysis.checkers.MppCheckerKind
 import org.jetbrains.kotlin.fir.analysis.checkers.context.CheckerContext
 import org.jetbrains.kotlin.fir.analysis.checkers.declaration.FirRegularClassChecker
 import org.jetbrains.kotlin.fir.analysis.diagnostics.FirErrors
 import org.jetbrains.kotlin.fir.declarations.FirRegularClass
+import org.jetbrains.kotlin.fir.declarations.constructors
+import org.jetbrains.kotlin.fir.declarations.declaredFunctions
 import org.jetbrains.kotlin.fir.declarations.utils.hasBackingField
 import org.jetbrains.kotlin.fir.plugin.createConeType
+import org.jetbrains.kotlin.fir.resolve.getSuperClassSymbolOrAny
 import org.jetbrains.kotlin.fir.resolve.providers.symbolProvider
+import org.jetbrains.kotlin.fir.scopes.getDeclaredConstructors
 import org.jetbrains.kotlin.fir.scopes.impl.declaredMemberScope
 import org.jetbrains.kotlin.fir.scopes.processAllProperties
+import org.jetbrains.kotlin.fir.symbols.impl.FirClassSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirPropertySymbol
 import org.jetbrains.kotlin.lombok.LombokFirDiagnostics
 import org.jetbrains.kotlin.lombok.config.lombokService
+import org.jetbrains.kotlin.lombok.generators.hasReceiverOrContextParameters
+import org.jetbrains.kotlin.lombok.generators.isGeneratedConstructor
+import org.jetbrains.kotlin.lombok.generators.supportsGeneratedConstructor
 import org.jetbrains.kotlin.name.JvmStandardClassIds
+import org.jetbrains.kotlin.name.Name
 
 object FirLombokConstructorsChecker : FirRegularClassChecker(MppCheckerKind.Platform) {
     context(context: CheckerContext, reporter: DiagnosticReporter)
     override fun check(declaration: FirRegularClass) {
-        val toStringAnnInfo = context.session.lombokService.getNoArgsConstructor(declaration.symbol) ?: return
+        val noArgsConstructor = context.session.lombokService.getNoArgsConstructor(declaration.symbol) ?: return
 
-        val source = toStringAnnInfo.annotation.source ?: declaration.source ?: return
+        val source = noArgsConstructor.annotation.source ?: declaration.source ?: return
 
-        if (!toStringAnnInfo.force) {
+        var staticNameIsTaken = false
+
+        // Nothing at all is generated for an inner or a local class (see `supportsGeneratedConstructor`), and every
+        // check below concerns a declaration that would have been generated. `ANNOTATION_HAS_NO_EFFECT` says the
+        // annotation does nothing here; piling the others on top would describe members that never appear.
+        if (!declaration.symbol.supportsGeneratedConstructor) return
+
+        if (!noArgsConstructor.force) {
             val declaredMemberScope = context.session.declaredMemberScope(declaration.symbol, memberRequiredPhase = null)
             var hasUninitializedValProperty = false
             declaredMemberScope.processAllProperties { varSymbol ->
@@ -45,7 +63,8 @@ object FirLombokConstructorsChecker : FirRegularClassChecker(MppCheckerKind.Plat
             }
         }
 
-        if (toStringAnnInfo.staticName != null) {
+        val staticName = noArgsConstructor.staticName?.let { Name.identifier(it) }
+        if (staticName != null) {
             // If `staticName` is provided, we generate a companion object with a constructor function marked with `@JvmStatic`.
             // So, we need to check if it's resolved to prevent crashing on codegen.
             if (context.session.symbolProvider.getClassLikeSymbolByClassId(JvmStandardClassIds.Annotations.JvmStatic) == null) {
@@ -55,6 +74,74 @@ object FirLombokConstructorsChecker : FirRegularClassChecker(MppCheckerKind.Plat
                     JvmStandardClassIds.Annotations.JvmStatic.createConeType(context.session),
                     context
                 )
+            }
+
+            if (declaresStaticConstructor(context.session, declaration, staticName)) {
+                reporter.reportOn(source, LombokFirDiagnostics.STATIC_CONSTRUCTOR_ALREADY_EXISTS, staticName, declaration.name)
+                staticNameIsTaken = true
+            }
+        }
+
+        val declaresNoArgsConstructor = declaresNoArgsConstructor(context.session, declaration)
+        if (declaresNoArgsConstructor) {
+            reporter.reportOn(source, LombokFirDiagnostics.NO_ARGS_CONSTRUCTOR_ALREADY_EXISTS)
+        }
+
+        // A superclass without a constructor taking no arguments leaves the generated one nothing to delegate to,
+        // so nothing is generated - and only where that is the reason. The generator reaches the superclass last,
+        // after the clashes reported above already stopped it, and a second diagnostic naming a different cause
+        // would just be wrong about which one applies.
+        if (!declaresNoArgsConstructor && !staticNameIsTaken &&
+            !superclassDeclaresNoArgsConstructor(context.session, declaration)
+        ) {
+            reporter.reportOn(source, LombokFirDiagnostics.NO_NOARG_CONSTRUCTOR_IN_SUPERCLASS)
+        }
+    }
+
+    /**
+     * Whether the superclass of [declaration] provides the no-args constructor a generated one would delegate to.
+     *
+     * The first class in the supertype list, which is the one `tryGeneratingNoArgDelegatingConstructorCall` targets,
+     * and the same lookup it performs: a declared constructor taking no value parameters, rather than one whose
+     * parameters merely all have defaults.
+     *
+     * That function is deliberately not called here. It answers more than this diagnostic asks - it also gives up
+     * when there is no superclass symbol to be had at all, `kotlin.Any` included - and blaming a missing
+     * constructor for that would name a cause that isn't the one. Hence `true`, reporting nothing, when the
+     * superclass cannot be resolved.
+     */
+    private fun superclassDeclaresNoArgsConstructor(session: FirSession, declaration: FirRegularClass): Boolean {
+        val superClassSymbol = declaration.symbol.getSuperClassSymbolOrAny(session) ?: return true
+        return superClassSymbol.declaredMemberScope(session, memberRequiredPhase = null)
+            .getDeclaredConstructors()
+            .any { it.valueParameterSymbols.isEmpty() }
+    }
+
+    /**
+     * Whether [declaration] already provides the no-args constructor that would otherwise be generated.
+     *
+     * Only an explicitly written constructor counts, as in Java: a class that declares none has a no-args constructor
+     * regardless - implicit in Kotlin, generated by `javac` in Java - and neither language calls that a clash.
+     */
+    private fun declaresNoArgsConstructor(session: FirSession, declaration: FirRegularClass): Boolean {
+        return declaration.symbol.constructors(session).any {
+            it.source?.kind is KtRealSourceElementKind && it.valueParameterSymbols.isEmpty()
+        }
+    }
+
+    /**
+     * Whether the static factory named [staticName] is already taken for [declaration], either by the class itself,
+     * where it would shadow the factory, or by the companion object the factory is generated into.
+     */
+    private fun declaresStaticConstructor(session: FirSession, declaration: FirRegularClass, staticName: Name): Boolean {
+        val containers = listOfNotNull<FirClassSymbol<*>>(declaration.symbol, declaration.symbol.resolvedCompanionObjectSymbol)
+
+        return containers.any { container ->
+            container.declaredFunctions(session).any {
+                !it.origin.isGeneratedConstructor &&
+                        it.name == staticName &&
+                        !it.hasReceiverOrContextParameters &&
+                        it.valueParameterSymbols.isEmpty()
             }
         }
     }

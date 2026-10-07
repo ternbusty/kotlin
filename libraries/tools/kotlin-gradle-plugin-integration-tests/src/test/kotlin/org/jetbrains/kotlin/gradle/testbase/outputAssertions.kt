@@ -61,7 +61,7 @@ fun BuildResult.assertOutputDoesNotContain(
             endIndex = startIndex + notExpectedSubString.length
         } while (startIndex != -1)
 
-        val linesContainingSubString = occurrences.map { [startIndex, endIndex] ->
+        val linesContainingSubString = occurrences.map { (startIndex, endIndex) ->
             output.subSequence(
                 (startIndex - wrappingCharsCount).coerceAtLeast(0),
                 (endIndex + wrappingCharsCount).coerceAtMost(output.length)
@@ -204,12 +204,19 @@ fun getWarningModeChangeAdvice(warningMode: WarningMode) =
  *
  * Expected to be executed only for the case when [BuildOptions.warningMode] is not set to [WarningMode.Fail]
  */
-fun BuildResult.assertDeprecationWarningsArePresent(warningMode: WarningMode) {
+fun BuildResult.assertDeprecationWarningsArePresent(@Suppress("unused") warningMode: WarningMode) {
     assertOutputContains("[GradleWarningsDetectorPlugin] The plugin is being applied", NO_GRADLE_WARNINGS_DETECTOR_PLUGIN_ERROR_MESSAGE)
+
+    /*
+    This assertion is flaky:
+    Some deprecation warnings may skip when the test-kit daemon is warm, which cannot guarantee the assertion:
+    See: https://youtrack.jetbrains.com/issue/KT-88825
+
     assertOutputContains(
         "[GradleWarningsDetectorPlugin] Some deprecation warnings were found during this build.",
         getWarningModeChangeAdvice(warningMode)
     )
+     */
 }
 
 /**
@@ -222,7 +229,7 @@ fun BuildResult.assertDeprecationWarningsArePresent(warningMode: WarningMode) {
  */
 fun findParameterInOutput(name: String, output: String): String? =
     output.lineSequence().mapNotNull { line ->
-        val [key, value] = line.split('=', limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
+        val (key, value) = line.split('=', limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
         if (key.endsWith(name)) value else null
     }.firstOrNull()
 
@@ -430,10 +437,10 @@ fun CommandLineArguments.assertNoDuplicates() {
 
 private fun BuildResult.extractNativeCustomEnvironment(taskPath: String, toolName: NativeToolKind): Map<String, String> =
     extractNativeToolSettings(getOutputForTask(taskPath, LogLevel.INFO), toolName, NativeToolSettingsKind.CUSTOM_ENV_VARIABLES).map {
-        val [key, value] = it.split("=")
+        val (key, value) = it.split("=")
         key.trim() to value.trim()
     }.toMap()
 
 
 fun BuildResult.extractOutputForTask(taskPath: String): String =
-    output.split("\n(?=[^\n]*> Task :)".toRegex()).first { it.contains("> Task $taskPath") }
+    output.split("\n(?=[^\n]*> Task :)".toRegex()).filter { it.contains("> Task $taskPath") }.joinToString("\n")

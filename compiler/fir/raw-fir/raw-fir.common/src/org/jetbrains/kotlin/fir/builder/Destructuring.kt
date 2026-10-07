@@ -9,7 +9,6 @@ import org.jetbrains.kotlin.KtFakeSourceElementKind
 import org.jetbrains.kotlin.KtSourceElement
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibilities
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.FirModuleData
 import org.jetbrains.kotlin.fir.declarations.FirDeclarationOrigin
 import org.jetbrains.kotlin.fir.declarations.FirVariable
@@ -46,8 +45,9 @@ interface DestructuringContext<T> {
 }
 
 context(c: DestructuringContext<T>)
-fun <T> AbstractRawFirBuilder<*>.addDestructuringVariables(
+fun <T> AbstractRawFirBuilder<*, *>.addDestructuringVariables(
     destination: MutableList<in FirVariable>,
+    context: Context<*>,
     moduleData: FirModuleData,
     container: FirVariable,
     entries: List<T>,
@@ -61,6 +61,7 @@ fun <T> AbstractRawFirBuilder<*>.addDestructuringVariables(
     }
     for ([index, entry] in entries.withIndex()) {
         destination += buildDestructuringVariable(
+            context,
             moduleData,
             container,
             entry,
@@ -79,7 +80,8 @@ enum class DestructuringKind {
 }
 
 context(c: DestructuringContext<T>)
-fun <T> AbstractRawFirBuilder<*>.buildDestructuringVariable(
+fun <T> AbstractRawFirBuilder<*, *>.buildDestructuringVariable(
+    context: Context<*>,
     moduleData: FirModuleData,
     container: FirVariable,
     entry: T,
@@ -94,7 +96,7 @@ fun <T> AbstractRawFirBuilder<*>.buildDestructuringVariable(
             localEntries -> FirLocalPropertySymbol()
             else -> FirRegularPropertySymbol(callableIdForName(entry.name))
         }
-        withContainerSymbol(symbol, localEntries) {
+        context.withContainerSymbol(symbol, localEntries) {
             this.moduleData = moduleData
             origin = FirDeclarationOrigin.Source
             returnTypeRef = entry.returnTypeRef
@@ -137,7 +139,7 @@ fun <T> AbstractRawFirBuilder<*>.buildDestructuringVariable(
             isLocal = localEntries
             context.containerSymbolIfAny?.let { entry.extractAnnotationsTo(this, it) }
             if (!localEntries) {
-                dispatchReceiverType = currentDispatchReceiverType()
+                dispatchReceiverType = currentDispatchReceiverType(context)
                 getter = FirDefaultPropertyGetter(
                     source = source?.fakeElement(KtFakeSourceElementKind.DefaultAccessor.Getter),
                     moduleData = moduleData,

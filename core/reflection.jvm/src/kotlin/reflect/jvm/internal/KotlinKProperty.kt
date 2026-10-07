@@ -5,11 +5,16 @@
 
 package kotlin.reflect.jvm.internal
 
+import org.jetbrains.kotlin.builtins.CompanionObjectMapping
+import org.jetbrains.kotlin.builtins.isMappedIntrinsicCompanionObjectClassId
 import org.jetbrains.kotlin.descriptors.runtime.structure.safeClassLoader
+import org.jetbrains.kotlin.load.java.JvmAbi
+import org.jetbrains.kotlin.name.JvmStandardClassIds
 import java.lang.reflect.*
 import kotlin.LazyThreadSafetyMode.PUBLICATION
 import kotlin.metadata.*
 import kotlin.metadata.jvm.*
+import kotlin.reflect.ExperimentalCompanionExtensions
 import kotlin.reflect.*
 import kotlin.reflect.jvm.internal.calls.*
 
@@ -17,37 +22,41 @@ internal abstract class KotlinKProperty<out V>(
     override val container: KDeclarationContainerImpl,
     override val signature: String,
     override val rawBoundReceiver: Any?,
+    override val rawBoundContextArguments: List<Any?>,
     val kmProperty: KmProperty,
     overriddenStorage: KCallableOverriddenStorage,
 ) : KotlinKCallable<V>(overriddenStorage), ReflectKProperty<V> {
     override val name: String get() = kmProperty.name
 
+    protected val hasContextParameters: Boolean get() = kmProperty.contextParameters.isNotEmpty()
+
     private val extensionReceiverType: KmType? get() = kmProperty.receiverParameterType
 
     override val allParameters: List<KParameter> by lazy(PUBLICATION) {
-        computeParameters(
-            kmProperty.contextParameters, extensionReceiverType, valueParameters = emptyList(), typeParameterTable.value,
-            includeReceivers = true,
-        )
+        computeParameters(this, includeReceiver = true, includeContext = true)
     }
 
     override val parameters: List<KParameter> by lazy(PUBLICATION) {
-        if (isBound) computeParameters(
-            kmProperty.contextParameters, extensionReceiverType, valueParameters = emptyList(), typeParameterTable.value,
-            includeReceivers = false,
-        )
-        else allParameters
+        if (isBound) computeParameters(this, includeReceiver = !isReceiverBound, includeContext = !isContextBound) else allParameters
     }
 
+    private fun computeParameters(propertyOrAccessor: KotlinKCallable<*>, includeReceiver: Boolean, includeContext: Boolean): List<KParameter> =
+        propertyOrAccessor.computeParameters(
+            kmProperty.contextParameters, extensionReceiverType, valueParameters = emptyList(), typeParameterTable.value,
+            includeReceiver, includeContext,
+        )
+
     override val returnType: KType by lazy(PUBLICATION) {
-        kmProperty.returnType.toKType(
-            container.jClass.safeClassLoader, typeParameterTable.value,
-            computeJavaType = if (isLocalDelegated) null else fun(): Type = caller.returnType,
+        substituteType(
+            kmProperty.returnType.toKType(
+                container.jClass.safeClassLoader, typeParameterTable.value,
+                computeJavaType = if (isLocalDelegated) null else fun(): Type = caller.returnType,
+            )
         )
     }
 
     val typeParameterTable: Lazy<TypeParameterTable> = lazy(PUBLICATION) {
-        val parent = (container as? KClassImpl<*>)?.typeParameterTable
+        val parent = (originalContainer as? KClassImpl<*>)?.typeParameterTable
         TypeParameterTable.create(kmProperty.typeParameters, parent, this, container.jClass.safeClassLoader)
     }
 
@@ -59,19 +68,42 @@ internal abstract class KotlinKProperty<out V>(
     override val isLateinit: Boolean get() = kmProperty.isLateinit
     override val isConst: Boolean get() = kmProperty.isConst
 
+    @OptIn(kotlin.metadata.ExperimentalCompanionExtensions::class)
+    @ExperimentalCompanionExtensions
+    override val companionExtensionClass: KClass<*>?
+        get() = (kmProperty.companionExtensionReceiverType?.classifier as KmClassifier.Class?)?.let {
+            container.jClass.safeClassLoader.loadKClass(it.name)
+        }
+
     abstract override val getter: Getter<V>
 
     override val javaField: Field? by lazy(PUBLICATION) {
         if (isLocalDelegated) return@lazy null
         val fieldSignature = kmProperty.fieldSignature ?: return@lazy null
-        require(container is KPackageImpl) { "javaField is only supported for top-level properties for now: $container/$name $signature" }
-        val owner = container.jClass
+        val owner =
+            if (kmProperty.isMovedFromInterfaceCompanion || isPropertyWithBackingFieldInOuterClass())
+                originalContainer.jClass.enclosingClass
+            else
+                originalContainer.jClass
         try {
             owner.getDeclaredField(fieldSignature.name)
         } catch (_: NoSuchFieldException) {
             null
         }
     }
+
+    private fun isPropertyWithBackingFieldInOuterClass(): Boolean {
+        val container = container as? KClassImpl<*> ?: return false
+        return overriddenStorage == KCallableOverriddenStorage.EMPTY &&
+                isClassCompanionObjectWithBackingFieldsInOuter(container)
+    }
+
+    private fun isClassCompanionObjectWithBackingFieldsInOuter(klass: KClassImpl<*>): Boolean =
+        klass.isCompanion && klass.java.enclosingClass.kotlin.isClassOrEnumClass &&
+                !CompanionObjectMapping.isMappedIntrinsicCompanionObjectClassId(klass.classId)
+
+    private val KClass<*>.isClassOrEnumClass: Boolean
+        get() = this is KClassImpl<*> && (classKind == ClassKind.CLASS || classKind == ClassKind.ENUM_CLASS)
 
     protected fun computeDelegateSource(): Member? {
         if (!kmProperty.isDelegated) return null
@@ -88,21 +120,28 @@ internal abstract class KotlinKProperty<out V>(
 
     override val annotations: List<Annotation>
         get() {
+            if (!kmProperty.hasAnnotationsInBytecode) return emptyList()
+
             if (isLocalDelegated || container.jClass.isAnnotation) {
                 // Annotations on local delegated properties and annotation constructor properties are present only in the metadata.
                 return kmProperty.annotations.map { it.toAnnotation(container.jClass.safeClassLoader) }
             }
 
-            // For annotations in classes, we should also support $annotations methods in DefaultImpls, and properties in companion objects.
-            require(container is KPackageImpl) {
-                "Annotations are only supported for top-level properties for now: $container/$name $signature"
-            }
-
+            val container = originalContainer
+            val annotationContainer = if ((container as? KClassImpl<*>)?.classKind == ClassKind.INTERFACE) {
+                container.jClass.classes.firstOrNull { it.simpleName == JvmAbi.DEFAULT_IMPLS_CLASS_NAME }
+                    ?.kotlin as KDeclarationContainerImpl? ?: container
+            } else container
             val syntheticMethod = kmProperty.syntheticMethodForAnnotations ?: return emptyList()
-            val annotations = container.findMethodBySignature(syntheticMethod.name, syntheticMethod.descriptor)?.annotations?.toList()
+            val annotations = annotationContainer.findMethodBySignature(syntheticMethod.name, syntheticMethod.descriptor)
+                ?.annotations?.toList()
                 ?: throw KotlinReflectionInternalError("No synthetic method found: $this")
             return annotations.unwrapKotlinRepeatableAnnotations()
         }
+
+    @OptIn(ExperimentalCompanionBlocks::class)
+    override val isCompanionBlockMember: Boolean
+        get() = container is KClassImpl<*> && kmProperty.isCompanionBlockMember
 
     abstract class Accessor<out PropertyType, out ReturnType> :
         KotlinKCallable<ReturnType>(KCallableOverriddenStorage.EMPTY), KProperty.Accessor<PropertyType>, KFunction<ReturnType> {
@@ -116,6 +155,8 @@ internal abstract class KotlinKProperty<out V>(
 
         override val rawBoundReceiver: Any? get() = property.rawBoundReceiver
 
+        override val rawBoundContextArguments: List<Any?> get() = property.rawBoundContextArguments
+
         override val typeParameters: List<KTypeParameter> get() = property.typeParameters
 
         override val modality: Modality get() = accessor?.modality ?: property.modality
@@ -126,18 +167,25 @@ internal abstract class KotlinKProperty<out V>(
         override val isInfix: Boolean get() = false
         override val isSuspend: Boolean get() = false
 
+        override val isCompanionBlockMember: Boolean get() = property.isCompanionBlockMember
+
+        @ExperimentalCompanionExtensions
+        override val companionExtensionClass: KClass<*>? get() = property.companionExtensionClass
+
         final override fun shallowCopy(
             container: KDeclarationContainerImpl, overriddenStorage: KCallableOverriddenStorage,
         ): ReflectKCallable<ReturnType> =
             error("Property accessors can only be copied by copying the corresponding property")
 
-        override fun rebind(boundReceiver: Any?): ReflectKCallable<ReturnType> =
+        override fun bindToLowerArity(boundReceiver: Any?, boundContextArguments: List<Any?>) =
             error("Property accessors can only be bound by copying the corresponding property")
 
+
         override val annotations: List<Annotation>
-            get() =
-                if (property.isLocalDelegated) emptyList()
-                else (caller.member as? Method)?.annotations?.toList().orEmpty().unwrapKotlinRepeatableAnnotations()
+            get() {
+                if (property.isLocalDelegated || accessor?.hasAnnotationsInBytecode != true) return emptyList()
+                return (caller.member as? Method)?.annotations?.toList().orEmpty().unwrapKotlinRepeatableAnnotations()
+            }
     }
 
     abstract class Getter<out V> : Accessor<V, V>(), KProperty.Getter<V> {
@@ -146,8 +194,12 @@ internal abstract class KotlinKProperty<out V>(
         override val accessor: KmPropertyAccessorAttributes?
             get() = property.kmProperty.getter
 
-        override val allParameters: List<KParameter> get() = property.allParameters
-        override val parameters: List<KParameter> get() = property.parameters
+        override val allParameters: List<KParameter> by lazy(PUBLICATION) {
+            property.computeParameters(this, includeReceiver = true, includeContext = true)
+        }
+        override val parameters: List<KParameter> by lazy(PUBLICATION) {
+            if (isBound) property.computeParameters(this, includeReceiver = !isReceiverBound, includeContext = !isContextBound) else allParameters
+        }
 
         override val returnType: KType get() = property.returnType
 
@@ -155,7 +207,7 @@ internal abstract class KotlinKProperty<out V>(
             computeCallerForAccessor(isGetter = true)
         }
 
-        override fun equals(other: Any?): Boolean = other is Getter<*> && property == other.property
+        override fun equals(other: Any?): Boolean = other is KProperty.Getter<*> && property == other.property
         override fun hashCode(): Int = property.hashCode()
         override fun toString(): String = "getter of $property"
     }
@@ -166,16 +218,21 @@ internal abstract class KotlinKProperty<out V>(
         override val accessor: KmPropertyAccessorAttributes?
             get() = property.kmProperty.setter
 
-        override val allParameters: List<KParameter>
-            get() = property.allParameters + setterParameter.value
-        override val parameters: List<KParameter>
-            get() = property.parameters + setterParameter.value
-
-        private val setterParameter: Lazy<KParameter> = lazy(PUBLICATION) {
-            property.kmProperty.setterParameter?.let {
-                KotlinKParameter(this, it, property.allParameters.size, KParameter.Kind.VALUE, property.typeParameterTable.value)
-            } ?: DefaultSetterValueParameter(property)
+        override val allParameters: List<KParameter> by lazy(PUBLICATION) {
+            val propertyParameters = property.computeParameters(this, includeReceiver = true, includeContext = true)
+            propertyParameters + createSetterParameter(propertyParameters.size)
         }
+        override val parameters: List<KParameter> by lazy(PUBLICATION) {
+            if (isBound) {
+                val propertyParameters = property.computeParameters(this, includeReceiver = !isReceiverBound, includeContext = !isContextBound)
+                propertyParameters + createSetterParameter(propertyParameters.size)
+            } else allParameters
+        }
+
+        private fun createSetterParameter(index: Int): KParameter =
+            property.kmProperty.setterParameter?.let {
+                KotlinKParameter(this, it, index, KParameter.Kind.VALUE, property.typeParameterTable.value)
+            } ?: DefaultSetterValueParameter(property, index)
 
         override val returnType: KType get() = StandardKTypes.UNIT_RETURN_TYPE
 
@@ -183,14 +240,15 @@ internal abstract class KotlinKProperty<out V>(
             computeCallerForAccessor(isGetter = false)
         }
 
-        override fun equals(other: Any?): Boolean = other is Setter<*> && property == other.property
+        override fun equals(other: Any?): Boolean = other is KMutableProperty.Setter<*> && property == other.property
         override fun hashCode(): Int = property.hashCode()
         override fun toString(): String = "setter of $property"
     }
 
     override fun equals(other: Any?): Boolean {
         val that = other.asReflectProperty() ?: return false
-        return container == that.container && name == that.name && signature == that.signature && rawBoundReceiver == that.rawBoundReceiver
+        return container == that.container && name == that.name && signature == that.signature &&
+                rawBoundReceiver == that.rawBoundReceiver && rawBoundContextArguments == that.rawBoundContextArguments
     }
 
     override fun hashCode(): Int =
@@ -206,12 +264,12 @@ internal val KotlinKProperty.Accessor<*, *>.boundReceiver: Any?
 internal fun KotlinKProperty.Accessor<*, *>.computeCallerForAccessor(isGetter: Boolean): Caller<*> {
     val property = property
     if (property.isLocalDelegated) return ThrowingCaller
+    val kmProperty = property.kmProperty
 
-    fun isJvmStaticProperty(): Boolean {
-        // For class properties, we'll need to check if the synthetic `$annotations` method contains `@JvmStatic`.
-        require(container is KPackageImpl) { "Only top-level properties are supported for now: $container/$name" }
-        return false
-    }
+    fun isJvmStaticProperty(): Boolean =
+        container is KClassImpl<*> && kmProperty.annotations.any {
+            it.className == JvmStandardClassIds.Annotations.JvmStatic.asString()
+        }
 
     fun isNotNullProperty(): Boolean =
         !property.returnType.isNullableType()
@@ -219,34 +277,40 @@ internal fun KotlinKProperty.Accessor<*, *>.computeCallerForAccessor(isGetter: B
     fun computeFieldCaller(field: Field): CallerImpl<Field> = when {
         property.isJvmFieldPropertyInCompanionObject() || !Modifier.isStatic(field.modifiers) ->
             if (isGetter)
-                if (isBound) CallerImpl.FieldGetter.BoundInstance(field, boundReceiver)
+                if (isReceiverBound) CallerImpl.FieldGetter.BoundInstance(field, boundReceiver)
                 else CallerImpl.FieldGetter.Instance(field)
             else
-                if (isBound) CallerImpl.FieldSetter.BoundInstance(field, isNotNullProperty(), boundReceiver)
+                if (isReceiverBound) CallerImpl.FieldSetter.BoundInstance(field, isNotNullProperty(), boundReceiver)
                 else CallerImpl.FieldSetter.Instance(field, isNotNullProperty())
         isJvmStaticProperty() ->
             if (isGetter)
-                if (isBound) CallerImpl.FieldGetter.BoundJvmStaticInObject(field)
+                if (isReceiverBound) CallerImpl.FieldGetter.BoundJvmStaticInObject(field)
                 else CallerImpl.FieldGetter.JvmStaticInObject(field)
             else
-                if (isBound) CallerImpl.FieldSetter.BoundJvmStaticInObject(field, isNotNullProperty())
+                if (isReceiverBound) CallerImpl.FieldSetter.BoundJvmStaticInObject(field, isNotNullProperty())
                 else CallerImpl.FieldSetter.JvmStaticInObject(field, isNotNullProperty())
         else ->
             if (isGetter) CallerImpl.FieldGetter.Static(field)
             else CallerImpl.FieldSetter.Static(field, isNotNullProperty())
     }
 
-    val kmProperty = property.kmProperty
-    val accessorSignature = if (isGetter) kmProperty.getterSignature else kmProperty.setterSignature
+    val accessorSignature = when {
+        isGetter -> kmProperty.getterSignature ?: run {
+            // If both getter and field signatures are absent, it's a builtin property, so we need to compute the signature and use
+            // the accessor only (which must be getter, as there are no builtin mutable properties so far).
+            if (kmProperty.fieldSignature == null) kmProperty.computeJvmSignature(property.container) else null
+        }
+        else -> kmProperty.setterSignature
+    }
     val accessor = accessorSignature?.let { signature ->
         property.container.findMethodBySignature(signature.name, signature.descriptor)
     }
     return when {
         accessor == null -> {
             if (property.isUnderlyingPropertyOfValueClass() && property.visibility == KVisibility.INTERNAL) {
-                val unboxMethod = property.parameters.single().type.toInlineClass()?.getInlineClassUnboxMethod(property)
+                val unboxMethod = property.allParameters.single().type.toInlineClass()?.getInlineClassUnboxMethod(property)
                     ?: throw KotlinReflectionInternalError("Underlying property of inline class $property should have a field")
-                if (isBound) InternalUnderlyingValOfInlineClass.Bound(unboxMethod, boundReceiver)
+                if (isReceiverBound) InternalUnderlyingValOfInlineClass.Bound(unboxMethod, boundReceiver)
                 else InternalUnderlyingValOfInlineClass.Unbound(unboxMethod)
             } else {
                 val javaField = property.javaField
@@ -255,14 +319,13 @@ internal fun KotlinKProperty.Accessor<*, *>.computeCallerForAccessor(isGetter: B
             }
         }
         !Modifier.isStatic(accessor.modifiers) ->
-            if (isBound) CallerImpl.Method.BoundInstance(accessor, boundReceiver)
-            else CallerImpl.Method.Instance(accessor)
+            CallerImpl.Method.Instance(accessor, boundReceiver, boundContextArguments)
         isJvmStaticProperty() ->
-            if (isBound) CallerImpl.Method.BoundJvmStaticInObject(accessor)
-            else CallerImpl.Method.JvmStaticInObject(accessor)
+            CallerImpl.Method.JvmStaticInObject(accessor, boundReceiver, boundContextArguments)
         else ->
-            if (isBound) CallerImpl.Method.BoundStatic(accessor, isCallByToValueClassMangledMethod = false, boundReceiver)
-            else CallerImpl.Method.Static(accessor)
+            CallerImpl.Method.Static(
+                accessor, isCallByToValueClassMangledMethod = false, boundReceiver, boundContextArguments, hasInstanceParameter
+            )
     }.createValueClassAwareCallerIfNeeded(this, isDefault = false, forbidUnboxingForIndices = emptyList())
 }
 

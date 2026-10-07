@@ -6,7 +6,6 @@
 package org.jetbrains.kotlin.fir.resolve.calls.candidate
 
 import org.jetbrains.kotlin.KtFakeSourceElementKind
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.FirElement
 import org.jetbrains.kotlin.fir.declarations.FirAnonymousFunction
 import org.jetbrains.kotlin.fir.declarations.FirDeclarationOrigin
@@ -162,6 +161,15 @@ class Candidate(
         map[expression] = conversionInfo
     }
 
+    var argumentsWithNumericClassConversion: MutableMap<FirExpression, ConeKotlinType>? = null
+        private set
+
+    fun markUseOfNumericClassConversion(expression: FirExpression, expectedType: ConeKotlinType) {
+        val map = argumentsWithNumericClassConversion ?: HashMap<FirExpression, ConeKotlinType>()
+            .also { argumentsWithNumericClassConversion = it }
+        map[expression] = expectedType
+    }
+
     // Computed getters
 
     val usesSamConversion: Boolean
@@ -172,6 +180,9 @@ class Candidate(
 
     val usesFunctionKindConversion: Boolean
         get() = argumentsWithFunctionKindConversion != null || callableReferenceAdaptation?.hasFunctionKindConversion() == true
+
+    val usesNumericClassConversion: Boolean
+        get() = argumentsWithNumericClassConversion != null
 
     // ---------------------------------------- Argument mapping ----------------------------------------
 
@@ -259,7 +270,7 @@ class Candidate(
         }
     }
 
-    fun setUpdatedArgumentFromContextSensitiveResolution(old: FirPropertyAccessExpression, new: FirExpression) {
+    fun setUpdatedArgumentFromContextSensitiveResolution(old: FirExpression, new: FirExpression) {
         setUpdatedArgument(old, new)
     }
 

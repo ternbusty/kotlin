@@ -1,4 +1,4 @@
-// RUN_PIPELINE_TILL: BACKEND
+// RUN_PIPELINE_TILL: CODEGEN
 // FILE: Provider.java
 
 public class Provider {
@@ -9,7 +9,7 @@ public class Provider {
 
 // FILE: main.kt
 
-fun test_1(): Int = when (Provider.getCondition()) {
+fun test_1(): Int = <!WHEN_SUBJECT_CAN_BE_NULL_IN_JAVA!>when<!> (Provider.getCondition()) {
     true -> 1
     false -> 2
 }

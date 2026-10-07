@@ -8,8 +8,6 @@ package org.jetbrains.kotlin.kapt
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
-import com.sun.tools.javac.tree.JCTree
-import org.jetbrains.kotlin.cli.reportOutput
 import org.jetbrains.kotlin.cli.common.*
 import org.jetbrains.kotlin.cli.common.fir.FirDiagnosticsCompilerResultsReporter
 import org.jetbrains.kotlin.cli.common.messages.OutputMessageUtil
@@ -17,32 +15,25 @@ import org.jetbrains.kotlin.cli.common.modules.ModuleChunk
 import org.jetbrains.kotlin.cli.common.output.writeAll
 import org.jetbrains.kotlin.cli.jvm.config.JavaSourceRoot
 import org.jetbrains.kotlin.cli.jvm.config.JvmClasspathRoot
-import org.jetbrains.kotlin.cli.pipeline.ConfigurationPipelineArtifact
-import org.jetbrains.kotlin.cli.pipeline.PipelineArtifact
-import org.jetbrains.kotlin.cli.pipeline.jvm.JvmBackendPipelinePhase
-import org.jetbrains.kotlin.cli.pipeline.jvm.JvmFir2IrPipelinePhase
 import org.jetbrains.kotlin.cli.pipeline.jvm.JvmFrontendPipelineArtifact
-import org.jetbrains.kotlin.cli.pipeline.jvm.JvmFrontendPipelinePhase
 import org.jetbrains.kotlin.cli.registerExtensionStorage
-import org.jetbrains.kotlin.codegen.ClassBuilderMode
+import org.jetbrains.kotlin.cli.reportOutput
 import org.jetbrains.kotlin.config.*
-import org.jetbrains.kotlin.diagnostics.impl.DiagnosticsCollectorImpl
 import org.jetbrains.kotlin.fir.builder.FirSyntaxErrors
 import org.jetbrains.kotlin.fir.extensions.FirAnalysisHandlerExtension
 import org.jetbrains.kotlin.kapt.base.*
 import org.jetbrains.kotlin.kapt.base.util.KaptBaseError
 import org.jetbrains.kotlin.kapt.base.util.KaptLogger
-import org.jetbrains.kotlin.kapt.base.util.getPackageNameJava9Aware
 import org.jetbrains.kotlin.kapt.base.util.info
 import org.jetbrains.kotlin.kapt.stubs.KaptStubConverter
 import org.jetbrains.kotlin.kapt.stubs.KaptStubConverter.KaptStub
-import org.jetbrains.kotlin.kapt.stubs.OriginCollectingClassBuilderFactory
 import org.jetbrains.kotlin.kapt.util.CompilerConfigurationBackedKaptLogger
-import org.jetbrains.kotlin.kapt.util.prettyPrint
 import org.jetbrains.kotlin.kapt3.diagnostic.KaptError
-import org.jetbrains.kotlin.util.PhaseType
 import org.jetbrains.kotlin.utils.kapt.MemoryLeakDetector
 import java.io.File
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * This extension implements K2 kapt by invoking the compiler in the "skip bodies" / suppress-errors mode, and translating the resulting
@@ -66,11 +57,6 @@ open class FirKaptAnalysisHandlerExtension(
             configuration,
         )
 
-        if (optionsBuilder.mode == AptMode.WITH_COMPILATION) {
-            logger.error("KAPT \"compile\" mode is not supported in Kotlin 2.x. Run kapt with -Kapt-mode=stubsAndApt and use kotlinc for the final compilation step.")
-            return false
-        }
-
         optionsBuilder.apply {
             projectBaseDir = projectBaseDir ?: project.basePath?.let(::File)
             val contentRoots = configuration.contentRoots
@@ -89,7 +75,7 @@ open class FirKaptAnalysisHandlerExtension(
         if (options.mode.generateStubs) {
             val updatedConfiguration = configuration.copy().apply {
                 skipBodies = true
-                useLightTree = false
+                parserMode = ParserMode.LightTree
 
                 /*
                  * Later the KAPT pipeline registers extensions once again, so the extensions storage
@@ -176,54 +162,16 @@ open class FirKaptAnalysisHandlerExtension(
         }
     }
 
-    protected open fun updateConfiguration(configuration: CompilerConfiguration) {
-    }
-
-    @OptIn(PipelineArtifact.CliPipelineInternals::class)
     private fun contextForStubGeneration(disposable: Disposable, configuration: CompilerConfiguration): KaptContextForStubGeneration? {
-        updateConfiguration(configuration)
         configuration.moduleChunk = ModuleChunk(configuration.modules)
 
-        // We want to ignore all diagnostics except syntax one, which will be checked manually.
-        // So we need to create a new configuration with a separate diagnostics collector, to avoid
-        // reporting any errors into the diagnostics collector of the root configuration, which would be
-        // checked by the main CLI pipeline upon finishing the KAPT stage.
-        val configurationForFrontend = configuration.copy().apply {
-            diagnosticsCollector = DiagnosticsCollectorImpl()
-        }
-
-        val frontendInput = ConfigurationPipelineArtifact(configurationForFrontend, disposable)
-        val frontendOutput = JvmFrontendPipelinePhase.executePhase(frontendInput) ?: return null
-
-        if (checkForSyntaxErrorsAndReport(frontendOutput)) return null
-
-        configuration.perfManager?.notifyPhaseFinished(PhaseType.Analysis)
-
-        // FIR2IR checks for diagnostics in the collector after the main transformation and before const and plugin transformation,
-        // and early returns if there are any errors, so we need to create an empty diagnostics collector once again
-        val configurationForFir2Ir = configuration.copy().apply {
-            diagnosticsCollector = DiagnosticsCollectorImpl()
-        }
-        val fir2IrOutput = JvmFir2IrPipelinePhase.executePhase(
-            frontendOutput.withCompilerConfiguration(configurationForFir2Ir),
-            irGenerationExtensions = emptyList()
-        ) ?: return null
-
-        val builderFactory = OriginCollectingClassBuilderFactory(ClassBuilderMode.KAPT3)
-
-        // JVM backend checks for diagnostics in the collector and early returns if there are any errors
-        // so we need to create an empty diagnostics collector once again
-        val configurationForBackend = configuration.copy().apply {
-            diagnosticsCollector = DiagnosticsCollectorImpl()
-            put(JvmBackendPipelinePhase.customClassBuilderFactory, builderFactory)
-        }
-        val backendOutput = JvmBackendPipelinePhase.executePhase(fir2IrOutput.withCompilerConfiguration(configurationForBackend))
-        val generationState = backendOutput.outputs.singleOrNull() ?: return null
-
-        return KaptContextForStubGeneration(
-            options, false, logger, builderFactory.compiledClasses, builderFactory.origins, generationState,
-            frontendOutput.frontendOutput.outputs.flatMap { it.fir },
-            fir2IrOutput.result.irBuiltIns,
+        return compileForStubGeneration(
+            disposable,
+            configuration,
+            options,
+            logger,
+            withJdk = false,
+            onFrontendOutput = ::checkForSyntaxErrorsAndReport,
         )
     }
 
@@ -241,7 +189,7 @@ open class FirKaptAnalysisHandlerExtension(
     }
 
     private fun generateKotlinSourceStubs(kaptContext: KaptContextForStubGeneration) {
-        val converter = KaptStubConverter(kaptContext, generateNonExistentClass = true)
+        val converter = KaptStubConverter.create(kaptContext, generateNonExistentClass = true)
 
         val [stubGenerationTime, kaptStubs] = measureTimeMillis {
             converter.convert()
@@ -249,51 +197,54 @@ open class FirKaptAnalysisHandlerExtension(
 
         logger.info { "Java stub generation took $stubGenerationTime ms" }
         logger.info {
-            "Stubs for Kotlin classes: " + kaptStubs.joinToString {
-                if (options.stubGenerationScheme == StubGenerationScheme.DIRECT)
-                    it.directClassFilePathWithoutExtension + ".java"
-                else
-                    it.jtreeFile.sourcefile.name
-            }
+            "Stubs for Kotlin classes: " + kaptStubs.joinToString { it.sourceFileName() }
         }
 
-        saveStubs(kaptContext, kaptStubs)
-        saveIncrementalData(kaptContext, converter)
+        val [saveStubsTime] = measureTimeMillis { saveStubs(kaptContext, kaptStubs) }
+        logger.info { "Java stub saving took $saveStubsTime ms" }
+
+        val [saveIncrementalDataTime] = measureTimeMillis { saveIncrementalData(kaptContext) }
+        logger.info { "Incremental data saving took $saveIncrementalDataTime ms" }
     }
 
     protected open fun saveStubs(
         kaptContext: KaptContextForStubGeneration,
         stubs: List<KaptStub>,
     ) {
-        val reportOutputFiles = kaptContext.generationState.configuration.reportOutputFiles
-        val outputFiles = if (reportOutputFiles) kaptContext.generationState.factory.asList().associateBy {
+        val reportOutputFiles = kaptContext.configuration.reportOutputFiles
+        val outputFiles = if (reportOutputFiles) kaptContext.classFileFactory.asList().associateBy {
             it.relativePath.substringBeforeLast(".class", missingDelimiterValue = "")
         } else null
 
         val sourceFiles = mutableListOf<String>()
 
-        for (kaptStub in stubs) {
-            val stubFile = kaptStub.jtreeFile
-            val className: String
-            val packageName: String
-            val classFilePathWithoutExtension: String
-            if (options.stubGenerationScheme == StubGenerationScheme.DIRECT) {
-                className = kaptStub.directSimpleClassName
-                packageName = kaptStub.directPackageName
-                classFilePathWithoutExtension = kaptStub.directClassFilePathWithoutExtension
-            } else {
-                className = (stubFile.defs.first { it is JCTree.JCClassDecl } as JCTree.JCClassDecl).simpleName.toString()
-                packageName = stubFile.getPackageNameJava9Aware()?.toString() ?: ""
-                classFilePathWithoutExtension = if (packageName.isEmpty()) {
-                    className
-                } else {
-                    "${packageName.replace('.', '/')}/$className"
-                }
-            }
+        val packagePaths = HashMap<String, String>()
+        val packageDirs = HashMap<String, File>()
 
-            val packageDir =
-                if (packageName.isEmpty()) options.stubsOutputDir else File(options.stubsOutputDir, packageName.replace('.', '/'))
-            packageDir.mkdirs()
+        if (options.stubWriterThreads > 1 && options.stubGenerationScheme != StubGenerationScheme.DIRECT) {
+            logger.warn(
+                "Stub writer threads (${options.stubWriterThreads}) have no effect with the " +
+                        "'${options.stubGenerationScheme.stringValue}' stub generation scheme, stubs are written sequentially. " +
+                        "Use the '${StubGenerationScheme.DIRECT.stringValue}' scheme to write stubs in parallel."
+            )
+        }
+        val pendingWrites =
+            if (options.stubWriterThreads > 1 && options.stubGenerationScheme == StubGenerationScheme.DIRECT)
+                ArrayList<PendingStubWrite>(stubs.size)
+            else null
+
+        for (kaptStub in stubs) {
+            val className = kaptStub.simpleClassName()
+            val packageName = kaptStub.packageName()
+
+            val packagePath = packagePaths.getOrPut(packageName) { packageName.replace('.', '/') }
+            val classFilePathWithoutExtension = if (packageName.isEmpty()) className else "$packagePath/$className"
+
+            val packageDir = packageDirs.getOrPut(packageName) {
+                val dir = if (packageName.isEmpty()) options.stubsOutputDir else File(options.stubsOutputDir, packagePath)
+                dir.mkdirs()
+                dir
+            }
 
             val sourceFile = File(packageDir, "$className.java")
 
@@ -304,36 +255,98 @@ open class FirKaptAnalysisHandlerExtension(
                 if (classFilePathWithoutExtension == "error/NonExistentClass") return
                 val sourceFiles = (outputFiles?.get(classFilePathWithoutExtension)
                     ?: error("The `outputFiles` map is not properly initialized (key = $classFilePathWithoutExtension)")).sourceFiles
-                kaptContext.generationState.configuration.fileMappingTracker?.recordSourceFilesToOutputFileMapping(
-                    sourceFiles,
-                    generatedFile
-                )
+                kaptContext.configuration.fileMappingTracker?.recordSourceFilesToOutputFileMapping(sourceFiles, generatedFile)
                 logger.configuration.reportOutput(OutputMessageUtil.formatOutputMessage(sourceFiles, generatedFile))
             }
 
             reportStubsOutputForIC(sourceFile)
-            sourceFile.writeText(
-                if (options.stubGenerationScheme == StubGenerationScheme.DIRECT)
-                    kaptStub.directFileContent
-                else
-                    kaptStub.jtreeFile.prettyPrint(kaptContext.context)
-            )
+            if (pendingWrites != null) {
+                val metadata = kaptStub.metadataToWrite(forSource = sourceFile)
+                metadata?.let { reportStubsOutputForIC(it.first) }
+                pendingWrites += PendingStubWrite(sourceFile, kaptStub.getText(kaptContext.context), metadata)
+            } else {
+                sourceFile.writeText(kaptStub.getText(kaptContext.context))
 
-            kaptStub.writeMetadataIfNeeded(forSource = sourceFile, ::reportStubsOutputForIC)
+                kaptStub.writeMetadataIfNeeded(forSource = sourceFile, ::reportStubsOutputForIC)
+            }
+        }
+
+        if (pendingWrites != null) {
+            val [writeTime, usedThreads] = measureTimeMillis { writeStubsInParallel(pendingWrites, options.stubWriterThreads) }
+            if (usedThreads > 1) {
+                logger.info { "Parallel stub file writing took $writeTime ms on $usedThreads threads" }
+            } else {
+                logger.info { "Stub file writing took $writeTime ms (fewer than $MIN_STUBS_FOR_PARALLEL_WRITES stubs, written sequentially)" }
+            }
         }
 
         logger.info { "Source files: ${sourceFiles}" }
     }
 
-    protected open fun saveIncrementalData(
-        kaptContext: KaptContextForStubGeneration,
-        converter: KaptStubConverter,
-    ) {
+    private class PendingStubWrite(val sourceFile: File, val text: String, val metadata: Pair<File, ByteArray>?) {
+        fun write() {
+            sourceFile.writeText(text)
+            metadata?.let { it.first.writeBytes(it.second) }
+        }
+    }
+
+    // Returns 1 when writes stay on the caller thread; otherwise the worker count.
+    private fun writeStubsInParallel(writes: List<PendingStubWrite>, requestedThreads: Int): Int {
+        val threadCount = if (writes.size < MIN_STUBS_FOR_PARALLEL_WRITES) 1 else minOf(requestedThreads, writes.size)
+        if (threadCount <= 1) {
+            for (stub in writes) {
+                stub.write()
+            }
+            return 1
+        }
+
+        val threadIndex = AtomicInteger()
+        val executor = Executors.newFixedThreadPool(threadCount) { runnable ->
+            Thread(runnable, "kapt-stub-writer-${threadIndex.incrementAndGet()}").apply { isDaemon = true }
+        }
+        try {
+            // Contiguous ranges keep package-clustered stubs in distinct directories.
+            // Strided ranges tend to make all workers contend for the same directory.
+            val futures = (0 until threadCount).map { index ->
+                val from = (writes.size.toLong() * index / threadCount).toInt()
+                val to = (writes.size.toLong() * (index + 1) / threadCount).toInt()
+                executor.submit {
+                    for (i in from until to) {
+                        writes[i].write()
+                    }
+                }
+            }
+            var failure: Throwable? = null
+            for (future in futures) {
+                try {
+                    future.get()
+                } catch (e: InterruptedException) {
+                    // Restore the flag the throw cleared, so callers up the stack can still see the interruption.
+                    // The `finally` below shuts the pool down, which interrupts the writers that are still running.
+                    Thread.currentThread().interrupt()
+                    throw e
+                } catch (e: ExecutionException) {
+                    val cause = e.cause ?: e
+                    val firstFailure = failure
+                    if (firstFailure == null)
+                        failure = cause
+                    else
+                        firstFailure.addSuppressed(cause)
+                }
+            }
+            failure?.let { throw it }
+        } finally {
+            executor.shutdownNow()
+        }
+        return threadCount
+    }
+
+    protected open fun saveIncrementalData(kaptContext: KaptContextForStubGeneration) {
         val incrementalDataOutputDir = options.incrementalDataOutputDir ?: return
 
-        val reportOutputFiles = kaptContext.generationState.configuration.reportOutputFiles
-        kaptContext.generationState.factory.writeAll(incrementalDataOutputDir) { outputInfo, output ->
-            kaptContext.generationState.configuration.fileMappingTracker?.let {
+        val reportOutputFiles = kaptContext.configuration.reportOutputFiles
+        kaptContext.classFileFactory.writeAll(incrementalDataOutputDir) { outputInfo, output ->
+            kaptContext.configuration.fileMappingTracker?.let {
                 when (outputInfo.generatedForCompilerPlugin) {
                     false -> it.recordSourceFilesToOutputFileMapping(
                         outputInfo.sourceFiles,
@@ -350,7 +363,7 @@ open class FirKaptAnalysisHandlerExtension(
     }
 
     protected open fun createProcessorLoader(): ProcessorLoader =
-        EfficientProcessorLoader(options, logger)
+        ProcessorLoaderImpl(options, logger)
 
     private fun KaptOptions.Builder.checkOptions(logger: KaptLogger, configuration: CompilerConfiguration): Boolean? {
         if (classesOutputDir == null && configuration.outputJar != null) {
@@ -362,6 +375,17 @@ open class FirKaptAnalysisHandlerExtension(
             // Skip annotation processing if no annotation processors were provided
             logger.info("No annotation processors provided. Skip KAPT processing.")
             return true
+        }
+
+        if (KaptFlag.INCREMENTAL_APT in flags && incrementalCache == null) {
+            logger.warn("Incremental annotation processing is enabled, but no incremental cache was provided, this will lead to a full rebuild.")
+        }
+
+        if (usedDefaultDetectMemoryLeaks) {
+            logger.warn(
+                "The 'default' value for 'detectMemoryLeaks' is deprecated. " +
+                        "Use 'standard' instead."
+            )
         }
 
         if (sourcesOutputDir == null || classesOutputDir == null || stubsOutputDir == null) {
@@ -386,5 +410,10 @@ open class FirKaptAnalysisHandlerExtension(
         val start = System.currentTimeMillis()
         val result = block()
         return Pair(System.currentTimeMillis() - start, result)
+    }
+
+    private companion object {
+        // Tiny batches are faster on the caller thread than through the writer pool.
+        private const val MIN_STUBS_FOR_PARALLEL_WRITES = 16
     }
 }

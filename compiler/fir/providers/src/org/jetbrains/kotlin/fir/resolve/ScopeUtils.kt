@@ -21,6 +21,7 @@ import org.jetbrains.kotlin.fir.scopes.impl.getOrBuildScopeForIntegerConstantOpe
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassLikeSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirTypeParameterSymbol
+import org.jetbrains.kotlin.fir.symbols.lazyResolveBoundsToPhaseWithCallableMembersInSupertypes
 import org.jetbrains.kotlin.fir.types.*
 import org.jetbrains.kotlin.fir.types.ConeClassLikeTypeImpl
 import org.jetbrains.kotlin.name.ClassId
@@ -107,6 +108,15 @@ private fun ConeKotlinType.scope(
     }
     is ConeTypeParameterType -> {
         val symbol = lookupTag.symbol
+        scopeSession.ensureRequiredMembersPhase(
+            symbol,
+            TYPE_PARAMETER_REQUIRED_MEMBERS_PHASE_KEY,
+            requiredMembersPhase,
+            // The build requests the scopes of the bounds with the same phase
+            resolveOwner = {},
+            resolveHierarchy = { symbol.lazyResolveBoundsToPhaseWithCallableMembersInSupertypes(useSiteSession, it) },
+        )
+
         scopeSession.getOrBuild(symbol, TYPE_PARAMETER_SCOPE_KEY) {
             val intersectionType = ConeTypeIntersector.intersectTypes(
                 useSiteSession.typeContext,
@@ -138,6 +148,7 @@ private fun ConeKotlinType.scope(
                 ?: listOf(useSiteSession.builtinTypes.anyType.coneType)
         useSiteSession.typeContext.intersectTypes(supertypes).scope(useSiteSession, scopeSession, requiredMembersPhase)
     }
+    is ConeUnionType -> primaryType.scope(useSiteSession, scopeSession, requiredMembersPhase)
     else -> null
 }
 
@@ -188,3 +199,6 @@ fun ClassId.defaultType(parameters: List<FirTypeParameterSymbol>): ConeClassLike
     )
 
 val TYPE_PARAMETER_SCOPE_KEY: ScopeSessionKey<FirTypeParameterSymbol, FirTypeScope> = scopeSessionKey()
+
+private val TYPE_PARAMETER_REQUIRED_MEMBERS_PHASE_KEY: ScopeSessionKey<FirTypeParameterSymbol, FirRequiredMembersPhaseStamp> =
+    requiredMembersPhaseStampKey()

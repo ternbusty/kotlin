@@ -1,4 +1,4 @@
-// TARGET_BACKEND: JVM_IR
+// TARGET_BACKEND: JVM
 // FILE: J.java
 public class J {
     public static int f() { return 0; }
@@ -10,7 +10,6 @@ enum class A {
     val x = J.f()
 }
 
-// STOP_EVALUATION_CHECKS
 fun box(): String {
     return A.OK.name
 }

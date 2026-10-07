@@ -8,10 +8,12 @@ package org.jetbrains.kotlin.ir.inline.konan
 import org.jetbrains.kotlin.backend.common.LoweringContext
 import org.jetbrains.kotlin.backend.common.ModuleLoweringPass
 import org.jetbrains.kotlin.backend.common.PreSerializationLoweringContext
+import org.jetbrains.kotlin.backend.common.TailrecCheckerLowering
 import org.jetbrains.kotlin.backend.common.lower.UpgradeCallableReferences
 import org.jetbrains.kotlin.backend.common.phaser.createModulePhases
 import org.jetbrains.kotlin.backend.common.phaser.makeIrModulePhase
 import org.jetbrains.kotlin.backend.konan.lower.NativeAssertionWrapperLowering
+import org.jetbrains.kotlin.backend.konan.lower.NativeExportedBridgeCallDispatchLowering
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.config.phaser.NamedCompilerPhase
@@ -42,7 +44,9 @@ fun nativeLoweringsOfTheFirstPhase(
         if (languageVersionSettings.supportsFeature(LanguageFeature.IrIntraModuleInlinerBeforeKlibSerialization)) {
             this += ::NativeAssertionWrapperLowering
         }
+        this += ::NativeExportedBridgeCallDispatchLowering
         this += loweringsOfTheFirstPhase(languageVersionSettings)
+        this += ::TailrecCheckerLowering
     }
     return createModulePhases(*phases.toTypedArray())
 }

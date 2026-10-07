@@ -7,7 +7,6 @@ package org.jetbrains.kotlin.fir.java.declarations
 
 import org.jetbrains.kotlin.KtFakeSourceElementKind
 import org.jetbrains.kotlin.KtSourceElement
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.FirImplementationDetail
 import org.jetbrains.kotlin.fir.FirModuleData
 import org.jetbrains.kotlin.fir.builder.FirBuilderDsl
@@ -260,6 +259,10 @@ class FirJavaTypeParameter(
     }
 
     override fun <D> transformAnnotations(transformer: FirTransformer<D>, data: D): FirJavaTypeParameter {
+        return this
+    }
+
+    override fun <D> transformBounds(transformer: FirTransformer<D>, data: D): FirJavaTypeParameter {
         return this
     }
 

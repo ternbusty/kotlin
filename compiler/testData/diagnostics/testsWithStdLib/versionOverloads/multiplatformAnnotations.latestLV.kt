@@ -1,12 +1,10 @@
 // LATEST_LV_DIFFERENCE
 // ^ ACTUAL_ANNOTATIONS_NOT_MATCH_EXPECT is reported by IR actualizer, and latestLV tests don't run it
-// RUN_PIPELINE_TILL: BACKEND
+// RUN_PIPELINE_TILL: CODEGEN
 // RENDER_IR_DIAGNOSTICS_FULL_TEXT
 // LANGUAGE: +MultiPlatformProjects
 // MODULE: m1-common
 // FILE: common.kt
-
-@file:OptIn(ExperimentalVersionOverloading::class)
 
 expect fun missingAnnotation(
     x: String = "O",
@@ -20,8 +18,6 @@ expect fun annotationWithWrongNumber(
 
 // MODULE: m2-jvm()()(m1-common)
 // FILE: jvm.kt
-
-@file:OptIn(ExperimentalVersionOverloading::class)
 
 actual fun missingAnnotation(
     x: String,

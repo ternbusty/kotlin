@@ -9,14 +9,20 @@ object CompilerModules {
     )
 
     /**
-     * Common modules, used by K1 frontend, K2 frontend, backends, AA and CLI
+     * Modules of the Kotlin PSI
      */
-    val commonCompilerModules = descriptorsCompilerModules + arrayOf(
+    val psiModules = arrayOf(
         ":compiler:psi:psi-api",
         ":compiler:psi:psi-impl",
         ":compiler:psi:psi-utils",
         ":compiler:psi:psi-frontend-utils",
         ":compiler:psi:parser",
+    )
+
+    /**
+     * Common modules, used by K1 frontend, K2 frontend, backends, AA and CLI
+     */
+    val commonCompilerModules = descriptorsCompilerModules + psiModules + arrayOf(
         ":compiler:frontend.common-psi",
         ":compiler:frontend.common",
         ":compiler:util",
@@ -26,6 +32,7 @@ object CompilerModules {
         ":compiler:compiler.version",
         ":compiler:resolution.common",
         ":compiler:resolution.common.jvm",
+        ":compiler:resolution.common.js",
         ":compiler:backend.common.jvm",
         ":compiler:plugin-api",
         ":core:metadata",
@@ -52,7 +59,6 @@ object CompilerModules {
         ":kotlin-util-klib-metadata",
         ":compiler:build-tools:kotlin-build-statistics",
         ":js:js.config",
-        ":js:js.frontend.common",
         ":js:js.ast", // used by js fir checkers and js backend
         ":wasm:wasm.config",
         ":native:base",
@@ -61,9 +67,9 @@ object CompilerModules {
     )
 
     /**
-     * Modules of K2 (FIR) frontend
+     * Modules of K2 (FIR) frontend (shared between compiler and AA)
      */
-    val firCompilerModules = arrayOf(
+    val firCommonCompilerModules = arrayOf(
         ":compiler:fir:cones",
         ":compiler:fir:providers",
         ":compiler:fir:semantics",
@@ -73,11 +79,9 @@ object CompilerModules {
         ":compiler:fir:plugin-utils",
         ":compiler:fir:tree",
         ":compiler:fir:fir-jvm",
-        ":compiler:fir:fir-js",
         ":compiler:fir:fir-native",
         ":compiler:fir:raw-fir:raw-fir.common",
         ":compiler:fir:raw-fir:psi2fir",
-        ":compiler:fir:raw-fir:light-tree2fir",
         ":compiler:fir:checkers",
         ":compiler:fir:checkers:checkers.jvm",
         ":compiler:fir:checkers:checkers.js",
@@ -89,6 +93,15 @@ object CompilerModules {
         ":compiler:fir:fir2ir:jvm-backend",  // TODO should not be in core modules but FIR IDE uses Fir2IrSignatureComposer from this module
         ":compiler:fir:fir2ir", // TODO should not be in core modules but FIR IDE uses Fir2IrSignatureComposer from this module
         ":compiler:java-direct",
+    )
+
+    /**
+     * Modules of K2 (FIR) frontend (all)
+     */
+    val firCompilerModules = firCommonCompilerModules + arrayOf(
+        ":compiler:fir:raw-fir:light-tree2fir",
+        ":compiler:fir:raw-fir:mp-parsing2fir",
+        ":compiler:multiplatform-parsing",
     )
 
     /**
@@ -106,7 +119,6 @@ object CompilerModules {
         ":core:deserialization",
         ":compiler:frontend:cfg",
         ":compiler:ir.psi2ir",
-        ":js:js.frontend",
         ":native:frontend.native",
         ":wasm:wasm.frontend",
     )
@@ -205,27 +217,37 @@ object CompilerModules {
 
     val analysisApiSurfaceModules = arrayOf(
         ":analysis:analysis-api",
+    )
+
+    val analysisApiStandaloneSurfaceModules = arrayOf(
         ":analysis:analysis-api-standalone",
     )
 
     /**
+     * The array of modules shipped in the 'kotlin-analysis-api-platform-interface' artifact.
+     */
+    val analysisApiPlatformInterfaceModules = arrayOf(
+        ":analysis:analysis-api-platform-interface",
+    )
+
+    val analysisApiStandaloneModules = arrayOf(
+        *analysisApiStandaloneSurfaceModules,
+        ":analysis:analysis-api-standalone:analysis-api-standalone-fir",
+    )
+
+    /**
      * The array of Analysis API modules that aren't part of [commonCompilerModules] (e.g., `:compiler:psi:psi-api`).
-     * It only covers production modules and is used only as a part of [projectsDependingOnStableStdlib].
+     * It only covers production modules, so modules that hold nothing but tests have to be listed separately.
      */
     val analysisApiModules = arrayOf(
         *analysisApiSurfaceModules,
+        *analysisApiPlatformInterfaceModules,
+        *analysisApiStandaloneModules,
         ":analysis:analysis-api-fir",
         ":analysis:analysis-api-fir-diagnostics",
         ":analysis:analysis-api-impl-base",
-        ":analysis:analysis-api-platform-interface",
-        ":analysis:analysis-api-standalone:analysis-api-fir-standalone-base",
-        ":analysis:analysis-api-standalone:analysis-api-standalone-base",
         ":analysis:analysis-internal-utils",
-        ":analysis:decompiled:decompiler-js",
-        ":analysis:decompiled:decompiler-native",
-        ":analysis:decompiled:decompiler-to-file-stubs",
-        ":analysis:decompiled:decompiler-to-psi",
-        ":analysis:decompiled:decompiler-to-stubs",
+        ":analysis:decompiled:decompiler",
         ":analysis:decompiled:light-classes-for-decompiled",
         ":analysis:low-level-api-fir",
         ":analysis:stubs",
@@ -249,18 +271,11 @@ object CompilerModules {
         ":prepare:analysis-api:kotlin-analysis-api-platform-interface",
         ":prepare:analysis-api:kotlin-analysis-api-implementation",
         ":prepare:analysis-api:kotlin-analysis-api-fir-diagnostics",
+        ":prepare:analysis-api:kotlin-analysis-api-standalone-surface",
+        ":prepare:analysis-api:kotlin-analysis-api-standalone-implementation",
         ":prepare:analysis-api:kotlin-analysis-api-intellij-api-surface-components",
         ":prepare:analysis-api:kotlin-analysis-api-intellij-implementation-components",
-        ":prepare:analysis-api:kotlin-analysis-api-allopen-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-assignment-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-compose-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-dataframe-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-js-plain-objects-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-kotlinx-serialization-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-lombok-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-noarg-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-parcelize-compiler-plugin-support",
-        ":prepare:analysis-api:kotlin-analysis-api-sam-with-receiver-compiler-plugin-support",
+        ":prepare:analysis-api:kotlin-analysis-api-internal-test-framework",
     )
 
     /**
@@ -408,6 +423,7 @@ object CompilerModules {
         ":kotlin-util-klib-metadata",
         ":native:kotlin-native-utils",
         ":compiler:build-tools:kotlin-build-tools-api",
+        ":compiler:build-tools:kotlin-build-tools-api-jps",
     )
 
     val compilerArtifactsForIde = listOfNotNull(

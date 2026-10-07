@@ -6,7 +6,6 @@
 package org.jetbrains.kotlin.fir.resolve.transformers.contracts
 
 import org.jetbrains.kotlin.KtFakeSourceElementKind
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.contracts.FirLegacyRawContractDescription
 import org.jetbrains.kotlin.fir.contracts.FirRawContractDescription
@@ -324,7 +323,9 @@ abstract class FirAbstractContractResolveTransformerDispatcher(
         }
 
         override fun transformReplSnippet(replSnippet: FirReplSnippet, data: ResolutionMode): FirReplSnippet {
-            return replSnippet
+            return context.withReplSnippet(replSnippet) {
+                replSnippet.transformSnippetClass(this, data)
+            }
         }
 
         override fun transformAnonymousObject(

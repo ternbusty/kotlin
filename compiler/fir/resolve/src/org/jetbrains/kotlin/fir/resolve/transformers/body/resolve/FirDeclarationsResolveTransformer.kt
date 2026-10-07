@@ -14,7 +14,6 @@ import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.descriptors.Visibility
-import org.jetbrains.kotlin.fakeElement
 import org.jetbrains.kotlin.fir.*
 import org.jetbrains.kotlin.fir.declarations.*
 import org.jetbrains.kotlin.fir.declarations.builder.buildValueParameter
@@ -36,8 +35,6 @@ import org.jetbrains.kotlin.fir.resolve.ResolutionMode.ArrayLiteralPosition
 import org.jetbrains.kotlin.fir.resolve.calls.ConeResolvedLambdaAtom
 import org.jetbrains.kotlin.fir.resolve.calls.candidate.Candidate
 import org.jetbrains.kotlin.fir.resolve.calls.candidate.candidate
-import org.jetbrains.kotlin.fir.types.coneTypeOrNull
-import org.jetbrains.kotlin.fir.types.contains
 import org.jetbrains.kotlin.fir.resolve.dfa.FirControlFlowGraphReferenceImpl
 import org.jetbrains.kotlin.fir.resolve.diagnostics.ConeLocalVariableNoTypeOrInitializer
 import org.jetbrains.kotlin.fir.resolve.inference.FirDelegatedPropertyInferenceSession
@@ -63,6 +60,7 @@ import org.jetbrains.kotlin.resolve.calls.inference.buildCurrentSubstitutor
 import org.jetbrains.kotlin.resolve.calls.inference.components.TypeVariableDirectionCalculator
 import org.jetbrains.kotlin.resolve.calls.inference.model.ProvideDelegateFixationPosition
 import org.jetbrains.kotlin.types.model.TypeConstructorMarker
+import org.jetbrains.kotlin.util.ArrayLiteralResolution
 import org.jetbrains.kotlin.util.OnlyForDefaultLanguageFeatureDisabled
 import org.jetbrains.kotlin.util.OperatorNameConventions
 import org.jetbrains.kotlin.util.PrivateForInline
@@ -212,6 +210,11 @@ open class FirDeclarationsResolveTransformer(
                     if (!initializerIsAlreadyResolved) {
                         val resolutionMode = withExpectedType(property.returnTypeRef)
                         property.transformInitializer(transformer, resolutionMode)
+                        val initializer = property.initializer
+                        val expectedType = property.returnTypeRef.coneTypeOrNull
+                        if (initializer != null && expectedType != null) {
+                            property.replaceInitializer(initializer.wrapIntoNumericClassConversionIfNeeded(expectedType, session))
+                        }
                         property.replaceBodyResolveState(FirPropertyBodyResolveState.INITIALIZER_RESOLVED)
                     }
 
@@ -338,7 +341,7 @@ open class FirDeclarationsResolveTransformer(
         if (property.returnTypeRef is FirResolvedTypeRef) {
             val typeArguments = (type as ConeClassLikeType).typeArguments
             val extensionType = property.receiverParameter?.typeRef?.coneType
-            val dispatchType = context.containingRegularClass?.let { containingClass ->
+            val dispatchType = context.containingClassDeclarations.lastOrNull()?.let { containingClass ->
                 containingClass.symbol.constructStarProjectedType(containingClass.typeParameters.size)
             }
             propertyReferenceAccess.replaceConeTypeOrNull(
@@ -628,10 +631,17 @@ open class FirDeclarationsResolveTransformer(
 
         var resultType: ConeKotlinType? = null
 
-        // Temporary declare all the "outer" variables as proper (i.e., all inner variables as improper)
+        // Temporary declare all variables as proper (i.e., all inner variables as improper)
         // Without that, all variables (both inner and outer ones) would be considered as improper,
         // while we want to fix to assume `Delegate<Tv>` as proper because `Tv` belongs to the outer system
-        candidateSystem.withTypeVariablesThatAreCountedAsProperTypes(candidateSystem.outerTypeVariables.orEmpty()) {
+        // testData/diagnostics/tests/delegatedProperty/inference/provideDelegateFixationResultContainsOtherInnerVariable.kt
+        val typeVariablesCountedAsProperTypes =
+            if (session.languageVersionSettings.supportsFeature(LanguageFeature.EliminateSecondKindIncorporation)) {
+                candidateSystem.notFixedTypeVariables.keys
+            } else {
+                candidateSystem.outerTypeVariables.orEmpty()
+            }
+        candidateSystem.withTypeVariablesThatAreCountedAsProperTypes(typeVariablesCountedAsProperTypes) {
             // TODO: reconsider the approach here (KT-61781 for tracking)
             // Actually, this code might fail with an exception in some rare cases (see KT-61781)
             // The problem is that in the issue example, when fixing T type variable, it has two upper bounds: X and Delegate<Y>
@@ -691,6 +701,11 @@ open class FirDeclarationsResolveTransformer(
                 val resolutionMode = withExpectedType(variable.returnTypeRef)
                 if (variable.initializer != null && variable.bodyResolveState < FirPropertyBodyResolveState.INITIALIZER_RESOLVED) {
                     variable.transformInitializer(transformer, resolutionMode)
+                    val initializer = variable.initializer
+                    val expectedType = variable.returnTypeRef.coneTypeOrNull
+                    if (initializer != null && expectedType != null) {
+                        variable.replaceInitializer(initializer.wrapIntoNumericClassConversionIfNeeded(expectedType, session))
+                    }
                     storeVariableReturnType(variable)
                 }
                 variable.transformBackingField(transformer, withExpectedType(variable.returnTypeRef))
@@ -811,6 +826,10 @@ open class FirDeclarationsResolveTransformer(
             // it's been propagated to receivers in the RawFirBuilder
             if (accessor.returnTypeRef is FirImplicitTypeRef && propertyTypeRef !is FirImplicitTypeRef) {
                 accessor.replaceReturnTypeRef(propertyTypeRef)
+            }
+
+            if (shouldResolveEverything) {
+                accessor.resolveLocalFunctionAnnotations()
             }
 
             if (accessor is FirDefaultPropertyAccessor || accessor.body == null) {
@@ -1019,13 +1038,13 @@ open class FirDeclarationsResolveTransformer(
 
         val containingDeclaration = context.containerIfAny
         return context.withNamedFunction(namedFunction, session) {
-            // this is required to resolve annotations on functions of local classes
             if (shouldResolveEverything) {
-                namedFunction.transformReceiverParameter(this, data)
-                doTransformTypeParameters(namedFunction)
+                namedFunction.resolveLocalFunctionAnnotations()
             }
 
-            if (containingDeclaration != null && containingDeclaration !is FirClass && containingDeclaration !is FirFile && (containingDeclaration !is FirScript || namedFunction.status.visibility == Visibilities.Local)) {
+            // A local function may still have a class or a file as the container, e.g., inside their annotation arguments
+            val isLocal = namedFunction.status.visibility == Visibilities.Local
+            if (containingDeclaration != null && isLocal) {
                 // For class members everything should be already prepared
                 prepareSignatureForBodyResolve(namedFunction)
                 namedFunction.transformStatus(this, namedFunction.resolveStatus().mode())
@@ -1041,6 +1060,41 @@ open class FirDeclarationsResolveTransformer(
                 }
             }
         }
+    }
+
+    /**
+     * If [FirFunction.isLocal] is `true`, resolves all annotations in the function signature.
+     *
+     * It's necessary to call this before the function parameters are added to the scope so that annotation arguments are not resolved
+     * to them.
+     *
+     * Resolves own annotations and annotations in receiver, type parameters, return type, and context and value parameters.
+     * Annotations inside parameter default values are not resolved here because they do in fact observe the function parameters.
+     *
+     * Non-local functions don't have this problem because their annotations are resolved in a different phase.
+     */
+    private fun FirFunction.resolveLocalFunctionAnnotations() {
+        if (!isLocal) return
+
+        transformReceiverParameter(transformer, ResolutionMode.ContextIndependent)
+        transformAnnotations(transformer, ResolutionMode.ContextIndependent)
+        transformReturnTypeRef(transformer, ResolutionMode.ContextIndependent)
+
+        @OptIn(PrivateForInline::class)
+        fun transformValueParameterAnnotations(parameters: List<FirValueParameter>) {
+            for (parameter in parameters) {
+                context.withContainer(parameter) {
+                    parameter
+                        .transformAnnotations(transformer, ResolutionMode.ContextIndependent)
+                        .transformReturnTypeRef(transformer, ResolutionMode.ContextIndependent)
+                }
+            }
+        }
+
+        transformValueParameterAnnotations(contextParameters)
+        transformValueParameterAnnotations(valueParameters)
+
+        doTransformTypeParameters(this)
     }
 
     private fun <F : FirFunction> transformFunctionWithGivenSignature(function: F, shouldResolveEverything: Boolean): F {
@@ -1115,8 +1169,6 @@ open class FirDeclarationsResolveTransformer(
         dataFlowAnalyzer.enterFunction(function)
 
         if (shouldResolveEverything) {
-            // Annotations here are required only in the case of a local class member function.
-            // Separate annotation transformers are responsible in the case of non-local functions.
             function
                 .transformReturnTypeRef(this, ResolutionMode.ContextIndependent)
                 .transformContextParameters(this, ResolutionMode.ContextIndependent)
@@ -1159,6 +1211,8 @@ open class FirDeclarationsResolveTransformer(
                     }
                 }
             }
+
+            constructor.resolveLocalFunctionAnnotations()
 
             return transformConstructorContent(constructor, data)
         }
@@ -1233,10 +1287,15 @@ open class FirDeclarationsResolveTransformer(
         val result = context.withValueParameter(valueParameter, session) {
             transformDeclarationContent(
                 valueParameter,
-                withExpectedType(
-                    valueParameter.returnTypeRef,
-                    arrayLiteralPosition = if (insideAnnotationConstructorDeclaration) ArrayLiteralPosition.AnnotationParameter else null
-                )
+                if (useArrayLiteralResolution()) {
+                    @OptIn(ArrayLiteralResolution::class)
+                    withExpectedType(
+                        valueParameter.returnTypeRef,
+                        arrayLiteralPosition = runIf(insideAnnotationConstructorDeclaration) { ArrayLiteralPosition.AnnotationParameter },
+                    )
+                } else {
+                    withExpectedType(valueParameter.returnTypeRef)
+                }
             ) as FirValueParameter
         }
 

@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.ir.builders.irBlock
 import org.jetbrains.kotlin.ir.builders.irExprBody
 import org.jetbrains.kotlin.ir.builders.irGet
 import org.jetbrains.kotlin.ir.builders.irGetField
+import org.jetbrains.kotlin.ir.builders.typeOperator
 import org.jetbrains.kotlin.ir.declarations.*
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.expressions.impl.IrCompositeImpl
@@ -57,6 +58,10 @@ internal class PropertyReferenceDelegationLowering(val context: JvmBackendContex
         irFile.transform(PropertyReferenceDelegationTransformer(context), null)
     }
 }
+
+// For now, the lowering does nothing with contextual references
+private val IrRichPropertyReference.isContextual: Boolean
+    get() = contextParametersCount > 0
 
 private class PropertyReferenceDelegationTransformer(val context: JvmBackendContext) : IrElementTransformerVoid() {
 
@@ -119,7 +124,8 @@ private class PropertyReferenceDelegationTransformer(val context: JvmBackendCont
             irExprBody(irBlock {
                 +delegateReference.getterFunction.inline(
                     getter,
-                    createAccessorArgumentsList(getter, delegateReference.getterFunction, isGetter = true, receiverProvider)
+                    createAccessorArgumentsList(getter, delegateReference.getterFunction, isGetter = true, receiverProvider),
+                    moveBody = false,
                 )
             })
         }
@@ -134,7 +140,8 @@ private class PropertyReferenceDelegationTransformer(val context: JvmBackendCont
         return irExprBody(irBlock {
             +delegateSetter.inline(
                 setter,
-                createAccessorArgumentsList(setter, delegateSetter, isGetter = false, receiverProvider)
+                createAccessorArgumentsList(setter, delegateSetter, isGetter = false, receiverProvider),
+                moveBody = false,
             )
         })
     }
@@ -154,7 +161,22 @@ private class PropertyReferenceDelegationTransformer(val context: JvmBackendCont
             if (boundReceiverOrNull != null) add(createTmpVariable(boundReceiverOrNull.deepCopyWithSymbols(accessor)))
             if (size + (if (isGetter) 0 else 1) < delegateAccessor.parameters.size) {
                 val unboundReceiver = accessor.getReceiverParameterOrNull()
-                if (unboundReceiver != null) add(unboundReceiver)
+                if (unboundReceiver != null) {
+                    add(
+                        createTmpVariable(
+                            /**
+                             * This implicit cast is needed so that [org.jetbrains.kotlin.backend.jvm.lower.SyntheticAccessorLowering]
+                             * correctly selects the parent class for the synthetic accessor.
+                             */
+                            typeOperator(
+                                delegateAccessor.parameters.first().type,
+                                irGet(unboundReceiver),
+                                IrTypeOperator.IMPLICIT_CAST,
+                                unboundReceiver.type
+                            )
+                        )
+                    )
+                }
             }
             if (setterParam != null) add(setterParam)
         }.also {
@@ -165,9 +187,9 @@ private class PropertyReferenceDelegationTransformer(val context: JvmBackendCont
     }
 
     private fun IrProperty.transform(): List<IrDeclaration>? {
-        val delegate = getRichPropertyReferenceForOptimizableDelegatedProperty() ?: return null
+        val delegate = getRichPropertyReferenceForOptimizableDelegatedProperty()?.takeUnless { it.isContextual } ?: return null
         val oldField = backingField ?: return null
-        val boundValueOrNull = delegate.singleBoundValueOrNull?.transform(this@PropertyReferenceDelegationTransformer, null)
+        val boundValueOrNull = delegate.boundValues.singleOrNull()?.transform(this@PropertyReferenceDelegationTransformer, null)
         backingField = boundValueOrNull?.takeIf { !it.canInline(parents.toSet()) }?.let {
             context.irFactory.buildField {
                 updateFrom(oldField)
@@ -248,10 +270,11 @@ private class PropertyReferenceDelegationTransformer(val context: JvmBackendCont
         val delegate = declaration.delegate
         val delegateInitializer = delegate?.initializer
         if (delegateInitializer !is IrRichPropertyReference ||
+            delegateInitializer.isContextual ||
             !declaration.getter.returnsResultOfStdlibCall ||
             declaration.setter?.returnsResultOfStdlibCall == false
         ) return super.visitLocalDelegatedProperty(declaration)
-        val receiver = delegateInitializer.singleBoundValueOrNull?.let { receiver ->
+        val receiver = delegateInitializer.boundValues.singleOrNull()?.let { receiver ->
             with(delegate) {
                 buildVariable(parent, startOffset, endOffset, origin, name, receiver.type)
             }.apply {

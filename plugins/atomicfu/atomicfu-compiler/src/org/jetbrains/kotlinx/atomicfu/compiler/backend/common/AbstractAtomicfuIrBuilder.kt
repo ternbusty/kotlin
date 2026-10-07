@@ -172,7 +172,7 @@ abstract class AbstractAtomicfuIrBuilder(
             volatileField,
             atomicfuProperty.visibility,
             isVar = true,
-            isStatic = false,
+            isStatic = atomicfuProperty.hasStaticBackingField,
             parentContainer
         )
         return VolatilePropertyReference(volatileProperty)
@@ -329,28 +329,38 @@ abstract class AbstractAtomicfuIrBuilder(
         dispatchReceiver: IrExpression?,
     ): IrFunctionAccessExpression
 
-    fun irPropertyReference(property: IrProperty, classReceiver: IrExpression?): IrPropertyReferenceImpl {
+    fun irPropertyReference(property: IrProperty, classReceiver: IrExpression?): IrRichPropertyReference {
         val backingField = requireNotNull(property.backingField) { "Backing field of the property $property should not be null" }
-        val isInstanceProperty = property.parentClassOrNull != null
+        val isInstanceProperty = property.parentClassOrNull != null && !backingField.isStatic
         val receiversCount = if (isInstanceProperty && classReceiver == null) 1 else 0
         val kPropertyClass = irBuiltIns.getKPropertyClass(property.isVar, receiversCount).owner
         val substitutionMap = mutableMapOf<IrTypeParameterSymbol, IrType>()
         if (receiversCount == 1)
             substitutionMap[kPropertyClass.typeParameters[0].symbol] = property.parentAsClass.defaultType
         substitutionMap[kPropertyClass.typeParameters.last().symbol] = backingField.type
-        return IrPropertyReferenceImpl(
+        val unboundReceiverType = if (receiversCount == 1) property.parentAsClass.defaultType else null
+        val getter = requireNotNull(property.getter) { "Getter of the property $property should not be null" }
+        val parent = scope.getLocalDeclarationParent()
+        return IrRichPropertyReferenceImpl(
             UNDEFINED_OFFSET, UNDEFINED_OFFSET,
             type = kPropertyClass.defaultType.substitute(substitutionMap),
-            symbol = property.symbol,
-            typeArgumentsCount = 0,
-            // Referring a field may violate visibility checks,
-            // but at the same time the field is not needed anywhere down the pipeline,
-            // so we can use value null here. See KT-85180.
-            field = null,
-            getter = property.getter?.symbol,
-            setter = property.setter?.symbol
+            reflectionTargetSymbol = property.symbol,
+            getterFunction = irBuiltIns.buildRichReferenceWrapper(
+                getter, parent,
+                boundReceiverType = classReceiver?.type,
+                parameterTypes = listOfNotNull(unboundReceiverType),
+                returnType = getter.returnType,
+            ),
+            setterFunction = property.setter?.let { setter ->
+                irBuiltIns.buildRichReferenceWrapper(
+                    setter, parent,
+                    boundReceiverType = classReceiver?.type,
+                    parameterTypes = listOfNotNull(unboundReceiverType) + backingField.type,
+                    returnType = irBuiltIns.unitType,
+                )
+            },
         ).apply {
-            dispatchReceiver = classReceiver
+            if (classReceiver != null) boundValues.add(classReceiver)
         }
     }
 

@@ -6,7 +6,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 import org.jetbrains.kotlin.gradle.plugin.diagnostics.KotlinToolingDiagnostics
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilerExecutionStrategy
 import org.jetbrains.kotlin.gradle.testbase.*
-import org.jetbrains.kotlin.testFederation.SmokeTest
+import org.jetbrains.kotlin.testFederation.MustRunAlways
 import org.jetbrains.kotlin.test.TestMetadata
 import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.DisplayName
@@ -19,7 +19,7 @@ import kotlin.io.path.invariantSeparatorsPathString
 
 @JvmGradlePluginTests
 @DisplayName("KGP simple tests")
-@SmokeTest
+@MustRunAlways
 class SimpleKotlinGradleIT : KGPBaseTest() {
 
     @GradleTest
@@ -96,7 +96,7 @@ class SimpleKotlinGradleIT : KGPBaseTest() {
     fun testLanguageVersion(gradleVersion: GradleVersion) {
         project("languageVersion", gradleVersion) {
             buildAndFail("build") {
-                assertOutputContains("The feature \"break continue in inline lambdas\" is only available since language version 2.2")
+                assertOutputContains("The feature \"unnamed local variables\" is only available since language version 2.5")
             }
         }
     }
@@ -303,7 +303,6 @@ class SimpleKotlinGradleIT : KGPBaseTest() {
     }
 
     @DisplayName("KT-63499: source sets conventions are not registered since Gradle 8.2")
-    @GradleTestVersions(minVersion = TestVersions.Gradle.G_8_2)
     @GradleTest
     fun sourceSetsConventionsAreNotRegistered(gradleVersion: GradleVersion) {
         project("simpleProject", gradleVersion) {

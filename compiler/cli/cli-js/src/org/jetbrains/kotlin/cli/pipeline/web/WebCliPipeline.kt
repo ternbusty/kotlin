@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2024 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
@@ -10,8 +10,8 @@ import org.jetbrains.kotlin.cli.common.arguments.CommonJsAndWasmCompilerArgument
 import org.jetbrains.kotlin.cli.common.arguments.K2JSCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.KotlinWasmCompilerArguments
 import org.jetbrains.kotlin.cli.pipeline.*
-import org.jetbrains.kotlin.cli.pipeline.web.js.JsBackendPipelinePhase
-import org.jetbrains.kotlin.cli.pipeline.web.wasm.WasmBackendPipelinePhase
+import org.jetbrains.kotlin.cli.pipeline.web.js.*
+import org.jetbrains.kotlin.cli.pipeline.web.wasm.*
 import org.jetbrains.kotlin.config.phaser.CompilerPhase
 import org.jetbrains.kotlin.util.PerformanceManager
 
@@ -19,11 +19,11 @@ abstract class WebCliPipeline<T : CommonJsAndWasmCompilerArguments>(
     override val defaultPerformanceManager: PerformanceManager,
 ) : AbstractCliPipeline<T>() {
 
-    abstract fun createCodeGenerationPhase(): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<T>, *>
+    abstract fun createCodeGenerationPhase(arguments: T): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<T>, *>
 
     override fun createCompoundPhase(arguments: T): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<T>, *> {
         return when {
-            arguments.includes != null -> createCodeGenerationPhase()
+            arguments.includes != null -> createCodeGenerationPhase(arguments)
             else -> createKlibSerializationPhase()
         }
     }
@@ -41,9 +41,18 @@ abstract class WebCliPipeline<T : CommonJsAndWasmCompilerArguments>(
 }
 
 class JsCliPipeline(defaultPerformanceManager: PerformanceManager) : WebCliPipeline<K2JSCompilerArguments>(defaultPerformanceManager) {
-    override fun createCodeGenerationPhase(): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<K2JSCompilerArguments>, *> {
-        return JsConfigurationPhase then
-                JsBackendPipelinePhase
+    override fun createCodeGenerationPhase(arguments: K2JSCompilerArguments): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<K2JSCompilerArguments>, *> {
+        return JsConfigurationPhase then if (arguments.cacheDirectory == null) {
+            // Non-incremental compilation pipeline
+            JsIrLoadingPipelinePhase then
+                    JsIrLoweringPipelinePhase then
+                    JsCodegenPipelinePhase then
+                    JsWriteOutputsPipelinePhase
+        } else {
+            // Incremental compilation pipeline
+            JsIncrementalCachePreparationPipelinePhase then
+                    JsIncrementalBuildingPhase
+        }
     }
 
     override val webConfigurationPhase = JsConfigurationPhase
@@ -51,9 +60,32 @@ class JsCliPipeline(defaultPerformanceManager: PerformanceManager) : WebCliPipel
 
 class WasmCliPipeline(defaultPerformanceManager: PerformanceManager) :
     WebCliPipeline<KotlinWasmCompilerArguments>(defaultPerformanceManager) {
-    override fun createCodeGenerationPhase(): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<KotlinWasmCompilerArguments>, out WebBackendPipelineArtifact> {
-        return WasmConfigurationPhase then
-                WasmBackendPipelinePhase
+    override fun createCodeGenerationPhase(arguments: KotlinWasmCompilerArguments): CompilerPhase<PipelineContext, ArgumentsPipelineArtifact<KotlinWasmCompilerArguments>, out WebBackendPipelineArtifact> {
+        val compilationMode = when {
+            arguments.wasmIncludedModuleOnly -> WasmCompilationMode.SINGLE_MODULE
+            arguments.wasmGenerateClosedWorldMultimodule -> WasmCompilationMode.MULTI_MODULE
+            else -> WasmCompilationMode.REGULAR
+        }
+        return WasmConfigurationPhase then if (arguments.cacheDirectory == null) {
+            // Non-incremental compilation pipeline
+            WasmIrLoadingPipelinePhase then WasmIrLinkingPipelinePhase then WasmIrLoweringPipelinePhase then
+                    when (compilationMode) {
+                        WasmCompilationMode.SINGLE_MODULE -> WasmSingleModuleBackendIrGenerationPipelinePhase
+                        WasmCompilationMode.MULTI_MODULE -> WasmMultiModuleBackendIrGenerationPipelinePhase
+                        WasmCompilationMode.REGULAR -> WasmWholeWorldBackendIrGenerationPipelinePhase
+                    }
+        } else {
+            // Incremental compilation pipeline
+            when (compilationMode) {
+                WasmCompilationMode.SINGLE_MODULE ->
+                    WasmSingleModuleIncrementalCachePreparationPipelinePhase then WasmSingleModuleIncrementalBuildingPhase
+                WasmCompilationMode.MULTI_MODULE ->
+                    WasmMultiModuleIncrementalCachePreparationPipelinePhase then WasmMultiModuleIncrementalBuildingPhase
+                WasmCompilationMode.REGULAR ->
+                    WasmWholeWorldIncrementalCachePreparationPipelinePhase then WasmWholeWorldIncrementalBuildingPhase
+
+            }
+        } then WasmOutputGenerationPipelinePhase then WasmWriteOutputsPipelinePhase
     }
 
     override val webConfigurationPhase = WasmConfigurationPhase

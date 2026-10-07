@@ -5,8 +5,7 @@
 
 package org.jetbrains.kotlin.fir.analysis.checkers.declaration
 
-import org.jetbrains.kotlin.KtFakeSourceElementKind
-import org.jetbrains.kotlin.KtSourceElement
+import org.jetbrains.kotlin.*
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.descriptors.ClassKind
 import org.jetbrains.kotlin.descriptors.Modality
@@ -26,7 +25,6 @@ import org.jetbrains.kotlin.fir.declarations.utils.isInterface
 import org.jetbrains.kotlin.fir.declarations.utils.modality
 import org.jetbrains.kotlin.fir.declarations.utils.visibility
 import org.jetbrains.kotlin.fir.isDisabled
-import org.jetbrains.kotlin.fir.languageVersionSettings
 import org.jetbrains.kotlin.fir.resolve.fullyExpandedType
 import org.jetbrains.kotlin.fir.resolve.toSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassifierSymbol
@@ -35,7 +33,8 @@ import org.jetbrains.kotlin.fir.symbols.impl.FirTypeAliasSymbol
 import org.jetbrains.kotlin.fir.types.*
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.toKtLightSourceElement
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.psiUtil.findDescendantOfType
 import org.jetbrains.kotlin.util.getChildren
 
 object FirSupertypesChecker : FirClassChecker(MppCheckerKind.Platform) {
@@ -69,10 +68,7 @@ object FirSupertypesChecker : FirClassChecker(MppCheckerKind.Platform) {
             checkAnnotationOnSuperclass(superTypeRef)
 
             val symbol = expandedSupertype.toSymbol()
-            val allowUsingClassTypeAsInterface =
-                context.session.languageVersionSettings.supportsFeature(LanguageFeature.AllowAnyAsAnActualTypeForExpectInterface) &&
-                        expandedSupertype.isAny &&
-                        expandedSupertype.abbreviatedType != null
+            val supertypeIsNotTypealiasToAny = !expandedSupertype.isTypealiasToAny
 
             if (symbol is FirRegularClassSymbol) {
                 if (!superClassSymbols.add(symbol)) {
@@ -80,14 +76,16 @@ object FirSupertypesChecker : FirClassChecker(MppCheckerKind.Platform) {
                 }
                 if (symbol.classKind != ClassKind.INTERFACE) {
                     if (classAppeared) {
-                        if (!allowUsingClassTypeAsInterface) {
+                        if (supertypeIsNotTypealiasToAny) {
                             reporter.reportOn(superTypeRef.source, FirErrors.MANY_CLASSES_IN_SUPERTYPE_LIST)
                         }
                     } else {
-                        classAppeared = true
+                        if (supertypeIsNotTypealiasToAny) {
+                            classAppeared = true
+                        }
                     }
                     // DYNAMIC_SUPERTYPE will be reported separately
-                    if (isInterface && !supertypeIsDynamic && !allowUsingClassTypeAsInterface) {
+                    if (isInterface && !supertypeIsDynamic && supertypeIsNotTypealiasToAny) {
                         reporter.reportOn(superTypeRef.source, FirErrors.INTERFACE_WITH_SUPERCLASS)
                     }
                 }
@@ -209,15 +207,22 @@ object FirSupertypesChecker : FirClassChecker(MppCheckerKind.Platform) {
 
     private fun FirFunctionTypeParameter.findSourceForParameterName(): KtSourceElement? {
         val name = this.name ?: return null
-        val treeStructure = source.treeStructure
-        val nodes = source.lighterASTNode.getChildren(treeStructure)
-        val node = nodes.find { it.tokenType == KtTokens.IDENTIFIER && treeStructure.toString(it) == name.identifier } ?: return null
+        if (source is KtLightSourceElement) {
+            val treeStructure = source.treeStructure
+            val nodes = source.lighterASTNode.getChildren(treeStructure)
+            val node = nodes.find { it.tokenType == KtTokens.IDENTIFIER && treeStructure.toString(it) == name.identifier } ?: return null
 
-        return node.toKtLightSourceElement(
-            treeStructure,
-            startOffset = node.startOffset,
-            endOffset = node.endOffset
-        )
+            return node.toKtLightSourceElement(
+                treeStructure,
+                startOffset = node.startOffset,
+                endOffset = node.endOffset
+            )
+        } else {
+            val source = source
+            require(source is KtPsiSourceElement)
+            val psi = source.psi.findDescendantOfType<KtParameter> { it.nameAsName == name } ?: return null
+            return psi.nameIdentifier?.toKtPsiSourceElement()
+        }
     }
 
 

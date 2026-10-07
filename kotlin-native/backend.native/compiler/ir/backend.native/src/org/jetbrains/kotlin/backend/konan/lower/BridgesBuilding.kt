@@ -10,13 +10,13 @@ import org.jetbrains.kotlin.backend.common.DeclarationContainerLoweringPass
 import org.jetbrains.kotlin.backend.common.lower.createIrBuilder
 import org.jetbrains.kotlin.backend.common.lower.irBlockBody
 import org.jetbrains.kotlin.backend.common.lower.irIfThen
-import org.jetbrains.kotlin.backend.konan.NativeBackendContext
-import org.jetbrains.kotlin.backend.konan.descriptors.synthesizedName
+import org.jetbrains.kotlin.backend.konan.descriptors.*
 import org.jetbrains.kotlin.backend.konan.ir.*
 import org.jetbrains.kotlin.backend.konan.llvm.computeFunctionName
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.IrStatement
+import org.jetbrains.kotlin.backend.konan.NativeLoweringContext
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.builders.declarations.buildFun
 import org.jetbrains.kotlin.ir.declarations.*
@@ -144,7 +144,8 @@ internal class BridgesSupport(val irBuiltIns: IrBuiltIns, val symbols: BackendNa
         }
     }
 }
-internal class WorkersBridgesBuilding(val context: NativeBackendContext) : DeclarationContainerLoweringPass, IrElementTransformerVoid() {
+
+internal class WorkersBridgesBuilding(val context: NativeLoweringContext) : DeclarationContainerLoweringPass, IrElementTransformerVoid() {
     private val bridgesPolicy = context.config.bridgesPolicy
     val symbols = context.symbols
     lateinit var runtimeJobFunction: IrSimpleFunction
@@ -236,7 +237,7 @@ internal class WorkersBridgesBuilding(val context: NativeBackendContext) : Decla
     }
 }
 
-internal class BridgesBuilding(val context: NativeBackendContext) : ClassLoweringPass {
+internal class BridgesBuilding(val context: NativeLoweringContext) : ClassLoweringPass {
     private val bridgesPolicy = context.config.bridgesPolicy
 
     override fun lower(irClass: IrClass) {
@@ -247,8 +248,10 @@ internal class BridgesBuilding(val context: NativeBackendContext) : ClassLowerin
             for (overriddenFunction in function.allOverriddenFunctions) {
                 val overriddenFunctionInfo = OverriddenFunctionInfo(function, overriddenFunction, bridgesPolicy)
                 val bridgeDirections = overriddenFunctionInfo.bridgeDirections
-                if (!bridgeDirections.allNotNeeded() && overriddenFunctionInfo.canBeCalledVirtually
-                        && !overriddenFunctionInfo.inheritsBridge && set.add(bridgeDirections)) {
+                val canBeCalled = overriddenFunctionInfo.canBeCalledVirtually || context(context.config) {
+                    overriddenFunctionInfo.needsBridgeForCacheEntryPoint()
+                }
+                if (!bridgeDirections.allNotNeeded() && canBeCalled && !overriddenFunctionInfo.inheritsBridge && set.add(bridgeDirections)) {
                     buildBridge(overriddenFunctionInfo, irClass)
                     builtBridges += function
                 }
@@ -340,7 +343,7 @@ private fun IrBlockBodyBuilder.buildTypeSafeBarrier(function: IrFunction,
     }
 }
 
-private fun NativeBackendContext.buildBridge(startOffset: Int, endOffset: Int,
+private fun NativeLoweringContext.buildBridge(startOffset: Int, endOffset: Int,
                                              overriddenFunction: OverriddenFunctionInfo, targetSymbol: IrSimpleFunctionSymbol,
                                              superQualifierSymbol: IrClassSymbol? = null): IrFunction {
     val target = targetSymbol.owner.target

@@ -3,11 +3,12 @@
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
-@file:OptIn(KtNonPublicApi::class)
+@file:OptIn(KtIdeApi::class)
 
 package org.jetbrains.kotlin.psi
 
 import com.intellij.lang.ASTNode
+import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.KtStubBasedElementTypes
 import org.jetbrains.kotlin.lexer.KtModifierKeywordToken
 import org.jetbrains.kotlin.psi.stubs.KotlinConstructorStub
@@ -22,9 +23,13 @@ import org.jetbrains.kotlin.psi.stubs.KotlinConstructorStub
  * //           ^___________________________^
  * ```
  */
+@OptIn(KtImplementationDetail::class)
 class KtPrimaryConstructor : KtConstructor<KtPrimaryConstructor> {
+    @KtImplementationDetail
     constructor(node: ASTNode) : super(node)
-    constructor(stub: KotlinConstructorStub<KtPrimaryConstructor>) : super(stub, KtStubBasedElementTypes.PRIMARY_CONSTRUCTOR)
+
+    @KtImplementationDetail
+    constructor(stub: KotlinConstructorStub<KtPrimaryConstructor>) : super(stub, KtNodeTypes.PRIMARY_CONSTRUCTOR)
 
     override fun <R, D> accept(visitor: KtVisitor<R, D>, data: D) = visitor.visitPrimaryConstructor(this, data)
 
@@ -36,6 +41,7 @@ class KtPrimaryConstructor : KtConstructor<KtPrimaryConstructor> {
             "this.removeRedundantConstructorKeyword()",
             "org.jetbrains.kotlin.idea.base.psi.removeRedundantConstructorKeyword",
         ),
+        level = DeprecationLevel.ERROR,
     )
     fun removeRedundantConstructorKeywordAndSpace() {
         KtPsiMutationService.getInstance().removeRedundantConstructorKeyword(this)
@@ -44,6 +50,7 @@ class KtPrimaryConstructor : KtConstructor<KtPrimaryConstructor> {
     @Deprecated(
         message = "Use addModifierKeyword(modifier) instead",
         replaceWith = ReplaceWith("this.addModifierKeyword(modifier)", "org.jetbrains.kotlin.idea.base.psi.addModifierKeyword"),
+        level = DeprecationLevel.ERROR,
     )
     override fun addModifier(modifier: KtModifierKeywordToken) {
         KtPsiMutationService.getInstance().addModifierKeyword(this, modifier)
@@ -52,6 +59,7 @@ class KtPrimaryConstructor : KtConstructor<KtPrimaryConstructor> {
     @Deprecated(
         message = "Use removeModifierKeyword(modifier) instead",
         replaceWith = ReplaceWith("this.removeModifierKeyword(modifier)", "org.jetbrains.kotlin.idea.base.psi.removeModifierKeyword"),
+        level = DeprecationLevel.ERROR,
     )
     override fun removeModifier(modifier: KtModifierKeywordToken) {
         KtPsiMutationService.getInstance().removeModifierKeyword(this, modifier)
@@ -60,9 +68,11 @@ class KtPrimaryConstructor : KtConstructor<KtPrimaryConstructor> {
     @Deprecated(
         message = "Use addAnnotation(annotationEntry) instead",
         replaceWith = ReplaceWith("this.addAnnotation(annotationEntry)", "org.jetbrains.kotlin.idea.base.psi.addAnnotation"),
+        level = DeprecationLevel.ERROR,
     )
     override fun addAnnotationEntry(annotationEntry: KtAnnotationEntry): KtAnnotationEntry =
         KtPsiMutationService.getInstance().addAnnotation(this, annotationEntry)
 
+    /** Always `false`: a primary constructor has no body and therefore never carries a contract. */
     override fun mayHaveContract(): Boolean = false
 }

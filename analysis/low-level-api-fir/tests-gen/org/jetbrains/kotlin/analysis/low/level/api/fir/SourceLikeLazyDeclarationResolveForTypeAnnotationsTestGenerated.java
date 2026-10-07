@@ -96,6 +96,18 @@ public class SourceLikeLazyDeclarationResolveForTypeAnnotationsTestGenerated ext
     }
 
     @Test
+    @TestMetadata("fullValueClassParameterTypeCollisionAndAnnotations.kt")
+    public void testFullValueClassParameterTypeCollisionAndAnnotations() {
+      run("fullValueClassParameterTypeCollisionAndAnnotations.kt");
+    }
+
+    @Test
+    @TestMetadata("fullValueClassParameterTypeCollisionAndAnnotationsScript.kts")
+    public void testFullValueClassParameterTypeCollisionAndAnnotationsScript() {
+      run("fullValueClassParameterTypeCollisionAndAnnotationsScript.kts");
+    }
+
+    @Test
     @TestMetadata("nestedClassAsAnnotationArgument.kt")
     public void testNestedClassAsAnnotationArgument() {
       run("nestedClassAsAnnotationArgument.kt");
@@ -1009,6 +1021,12 @@ public class SourceLikeLazyDeclarationResolveForTypeAnnotationsTestGenerated ext
     @TestMetadata("typePropagationFromPropertyWithInaccessibleAnnotationArgument.kt")
     public void testTypePropagationFromPropertyWithInaccessibleAnnotationArgument() {
       run("typePropagationFromPropertyWithInaccessibleAnnotationArgument.kt");
+    }
+
+    @Test
+    @TestMetadata("unresolvedAnnotations.kt")
+    public void testUnresolvedAnnotations() {
+      run("unresolvedAnnotations.kt");
     }
   }
 

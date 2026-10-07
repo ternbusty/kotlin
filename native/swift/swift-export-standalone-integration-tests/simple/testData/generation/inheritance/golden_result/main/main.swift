@@ -3,13 +3,18 @@ import KotlinRuntime
 import KotlinRuntimeSupport
 
 open class Foo: KotlinRuntime.KotlinBase {
-    public init() {
-        let __kt = __root___Foo_init_allocate()
+    public override init() {
+         let __kt: Swift.UnsafeMutableRawPointer!
+         if Self.self == main.Foo.self {
+             __kt = __root___Foo_init_allocate()
+         } else {
+             __kt = _kotlinAllocInstanceForSwiftSubclass(Self.self)
+         }
         super.init(__externalRCRefUnsafe: __kt, options: .asBoundBridge);
         { __root___Foo_init_initialize__TypesOfArguments__Swift_UnsafeMutableRawPointer__(__kt); return () }()
     }
     package override init(
-        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer?,
+        __externalRCRefUnsafe: Swift.UnsafeMutableRawPointer,
         options: KotlinRuntime.KotlinBaseConstructionOptions
     ) {
         super.init(__externalRCRefUnsafe: __externalRCRefUnsafe, options: options);

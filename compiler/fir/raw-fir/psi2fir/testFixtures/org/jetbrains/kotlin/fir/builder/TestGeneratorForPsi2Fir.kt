@@ -10,17 +10,11 @@ import org.jetbrains.kotlin.generators.util.TestGeneratorUtil
 
 fun main(args: Array<String>) {
     val mainClassName = TestGeneratorUtil.getMainClassName()
+    val testRoot = args[0]
+
     generateTestGroupSuiteWithJUnit5(args, mainClassName) {
-        testGroup("compiler/fir/raw-fir/psi2fir/tests-gen", "compiler/fir/raw-fir/psi2fir/testData") {
+        testGroup(testRoot, "compiler/fir/raw-fir/testData") {
             testClass<AbstractRawFirBuilderTestCase> {
-                model("rawBuilder", pattern = TestGeneratorUtil.KT_OR_KTS)
-            }
-
-            testClass<AbstractRawFirBuilderLazyBodiesByAstTest> {
-                model("rawBuilder", pattern = TestGeneratorUtil.KT_OR_KTS)
-            }
-
-            testClass<AbstractRawFirBuilderLazyBodiesByStubTest> {
                 model("rawBuilder", pattern = TestGeneratorUtil.KT_OR_KTS)
             }
 

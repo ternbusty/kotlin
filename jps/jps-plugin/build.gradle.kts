@@ -1,25 +1,19 @@
 
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.ideaExt.idea
 
 plugins {
     id("common-configuration")
-    id("test-federation-convention")
     id("com.autonomousapps.dependency-analysis")
     kotlin("jvm")
-    id("project-tests-convention")
     id("kotlin-build-helpers")
 }
 
 dependencies {
-    compileOnly(project(":jps:jps-platform-api-signatures"))
     testImplementation(testFixtures(project(":generators:test-generator")))
 
-    @Suppress("UNCHECKED_CAST")
     CompilerModules.kotlinJpsPluginEmbeddedDependencies
         .forEach { implementation(project(it)) }
 
-    @Suppress("UNCHECKED_CAST")
     CompilerModules.kotlinJpsPluginMavenDependencies
         .forEach { implementation(project(it)) }
 
@@ -30,6 +24,7 @@ dependencies {
     compileOnly(intellijPlatformUtil())
     compileOnly(jpsModel())
     compileOnly(jpsBuild())
+    compileOnly(jpsBuildDependencyGraph())
     compileOnly(jpsBuildJavacRt())
     compileOnly(jpsModelSerialization())
     compileOnly(intellijJDom())
@@ -68,6 +63,7 @@ dependencies {
 
     testImplementation(testFixtures(project(":compiler:incremental-compilation-impl")))
     testImplementation(jpsBuild())
+    testImplementation(jpsBuildDependencyGraph())
     testImplementation(jpsBuildJavacRt())
 
     testImplementation(platform(libs.junit.bom))
@@ -82,6 +78,25 @@ dependencies {
 
     testImplementation("org.projectlombok:lombok:${project.kotlinBuildProperties.versionsProperty("lombok").get()}")
     testImplementation(libs.kotlinx.serialization.json)
+}
+
+val btaImplSnapshot = configurations.dependencyScope("btaImplSnapshot")
+val btaImplSnapshotResolvable = configurations.resolvable("btaImplSnapshotResolvable") {
+    extendsFrom(btaImplSnapshot.get())
+}
+
+dependencies {
+    btaImplSnapshot(project(":compiler:build-tools:kotlin-build-tools-impl"))
+    btaImplSnapshot(project(":compiler:build-tools:kotlin-build-tools-cri-impl"))
+    // `compileOnly` in the implementation's build script, but needed at run time
+    btaImplSnapshot(project(":kotlin-reflect"))
+    btaImplSnapshot(project(":kotlin-daemon-client"))
+}
+
+val btaImplHome = layout.buildDirectory.dir("btaImplHome")
+val prepareBtaImplHome = tasks.register<Sync>("prepareBtaImplHome") {
+    from(btaImplSnapshotResolvable)
+    into(btaImplHome)
 }
 
 sourceSets {
@@ -105,19 +120,20 @@ idea {
     this.module.generatedSourceDirs.add(projectDir.resolve("jps-tests").resolve("tests-gen"))
 }
 
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
+jvmToolchains {
+    jdkVersion = JdkMajorVersion.JDK_21_0
+    targetBytecodeVersion = JdkMajorVersion.JDK_21_0
+    configureForSourceSet("main") {
+        targetBytecodeVersion = JdkMajorVersion.JDK_11_0
     }
 }
 
-tasks.compileJava {
-    sourceCompatibility = "11"
-    targetCompatibility = "11"
-}
-
-tasks.compileKotlin {
-    compilerOptions.jvmTarget = JvmTarget.JVM_11
+kotlin {
+    compilerOptions {
+        optIn.add("org.jetbrains.kotlin.buildtools.api.ExperimentalBuildToolsApi")
+        optIn.add("org.jetbrains.kotlin.buildtools.api.arguments.ExperimentalCompilerArgument")
+        optIn.add("org.jetbrains.kotlin.buildtools.api.jps.InternalBuildToolsApi")
+    }
 }
 
 projectTests {
@@ -130,6 +146,21 @@ projectTests {
         dependsOn(":kotlin-compiler:dist")
         dependsOn(":kotlin-stdlib:jsJarForTests")
         workingDir = rootDir
+
+        // The JPS tests run against the new dependency graph architecture.
+        // KotlinBuilder caches these properties in companion vals on class initialization,
+        // so they have to be set before the test JVM starts, not from a test fixture.
+        systemProperty("jps.use.dependency.graph", true)
+        systemProperty("kotlin.jps.dumb.mode", true)
+        systemProperty("kotlin.jps.enable.lookups.in.dumb.mode", true)
+        systemProperty("jvm-inc-builder.test.track.mock.annotations", true)
+        // for debugging tests with in-process compiler
+        systemProperty("kotlin.jps.classPrefixesToLoadByParent", "kotlin.")
+        inputs.files(prepareBtaImplHome).withPropertyName("btaImplHome").withNormalizer(ClasspathNormalizer::class)
+        systemProperty("kotlin.jps.build.tools.impl.home", btaImplHome.get().asFile.absolutePath)
+        providers.gradleProperty("kotlin.jps.build.tools.impl.home").orNull?.let {
+            systemProperty("kotlin.jps.build.tools.impl.home", it)
+        }
         jvmArgs(
             // https://github.com/JetBrains/intellij-community/blob/b49faf433f8d73ccd46016a5717f997d167de65f/jps/jps-builders/src/org/jetbrains/jps/cmdline/ClasspathBootstrap.java#L67
             "--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
@@ -163,7 +194,7 @@ projectTests {
     withJvmStdlibAndReflect()
 }
 
-testsJar {}
+testsJarToBeUsedAlongWithFixtures()
 
 /**
  * Dependency Security Overrides

@@ -14,6 +14,7 @@ import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.provider.Provider
 import org.jetbrains.kotlin.compilerRunner.btapi.BuildSessionService
 import org.jetbrains.kotlin.gradle.dsl.ExplicitApiMode
+import org.jetbrains.kotlin.gradle.dsl.ReturnValueCheckerMode
 import org.jetbrains.kotlin.gradle.dsl.multiplatformExtensionOrNull
 import org.jetbrains.kotlin.gradle.internal.ClassLoadersCachingBuildService
 import org.jetbrains.kotlin.gradle.internal.KOTLIN_BUILD_TOOLS_API_IMPL
@@ -40,8 +41,7 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
         configureTaskProvider { taskProvider ->
 
             val jvmToolchain = taskProvider.flatMap { it.defaultKotlinJavaToolchain }
-            @Suppress("DEPRECATION") val runKotlinCompilerViaBuildToolsApi = propertiesProvider.runKotlinCompilerViaBuildToolsApi
-            registerTransformsOnce(project, jvmToolchain, runKotlinCompilerViaBuildToolsApi)
+            registerTransformsOnce(project, jvmToolchain)
             // Note: Creating configurations should be done during build configuration, not task configuration, to avoid issues with
             // composite builds (e.g., https://issuetracker.google.com/183952598).
             val classpathConfiguration = project.configurations.detachedResolvable(
@@ -53,7 +53,7 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
                 task.useFirRunner.convention(propertiesProvider.incrementalJvmFir)
                 task.enableJvmClasspathMetadata.convention(propertiesProvider.enableJvmClasspathMetadata)
                 task.enableUnsafeIncrementalCompilationForMultiplatform
-                    .convention(propertiesProvider.enableJvmUnsafeOptimizationsForMultiplatform)
+                    .convention(propertiesProvider.enableJvmIncrementalCompilationOfCommonSources)
                     .finalizeValueOnRead()
                 task.usePreciseJavaTracking = propertiesProvider.usePreciseJavaTracking ?: true
                 task.jvmTargetValidationMode.convention(propertiesProvider.jvmTargetValidationMode).finalizeValueOnRead()
@@ -112,9 +112,11 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
     constructor(
         project: Project,
         explicitApiMode: Provider<ExplicitApiMode>,
+        returnValueCheckerMode: Provider<ReturnValueCheckerMode>
     ) : super(
         project,
-        explicitApiMode
+        explicitApiMode,
+        returnValueCheckerMode,
     )
 
     companion object {
@@ -128,14 +130,13 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
     private fun registerTransformsOnce(
         project: Project,
         jvmToolchain: Provider<DefaultKotlinJavaToolchain>,
-        runKotlinCompilerViaBuildToolsApi: Provider<Boolean>,
     ) {
         if (project.extensions.extraProperties.has(TRANSFORMS_REGISTERED)) {
             return
         }
         project.extensions.extraProperties[TRANSFORMS_REGISTERED] = true
 
-        registerBuildToolsApiTransformations(project, jvmToolchain, runKotlinCompilerViaBuildToolsApi)
+        registerBuildToolsApiTransformations(project, jvmToolchain)
     }
 
     private fun TransformSpec<ClasspathEntrySnapshotTransform.Parameters>.configureCommonParameters(
@@ -143,7 +144,6 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
         classLoadersCachingService: Provider<ClassLoadersCachingBuildService>,
         classpath: Provider<out Configuration>,
         jvmToolchain: Provider<DefaultKotlinJavaToolchain>,
-        runKotlinCompilerViaBuildToolsApi: Provider<Boolean>,
         buildSessionService: Provider<BuildSessionService>,
     ) {
         parameters.gradleUserHomeDir.set(project.gradle.gradleUserHomeDir)
@@ -161,20 +161,14 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
                 emptySet()
             }
         })
-        parameters.compilationViaBuildToolsApi.set(runKotlinCompilerViaBuildToolsApi)
         parameters.kgpVersion.set(kgpVersion)
-        parameters.parseInlinedLocalClasses.set(project.kotlinPropertiesProvider.parseInlinedLocalClasses)
 
         val isMultiplatform = project.multiplatformExtensionOrNull != null
         parameters.expandTypeAliases.set(
             project.kotlinPropertiesProvider.expandTypeAliasesInClasspathSnapshots.map { it && isMultiplatform }
         )
 
-        val suppressVersionInconsistencyChecks = project.kotlinPropertiesProvider.suppressBuildToolsApiVersionConsistencyChecks
-        if (!suppressVersionInconsistencyChecks) {
-            parameters.buildToolsImplVersion.set(classpath.map { configuration -> configuration.findBuildToolsApiImplVersion() })
-        }
-        parameters.suppressVersionInconsistencyChecks.set(suppressVersionInconsistencyChecks)
+        parameters.buildToolsImplVersion.set(classpath.map { configuration -> configuration.findBuildToolsApiImplVersion() })
         parameters.buildSessionService.set(buildSessionService)
     }
 
@@ -188,7 +182,6 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
     private fun registerBuildToolsApiTransformations(
         project: Project,
         jvmToolchain: Provider<DefaultKotlinJavaToolchain>,
-        runKotlinCompilerViaBuildToolsApi: Provider<Boolean>
     ) {
         val classLoadersCachingService = ClassLoadersCachingBuildService.registerIfAbsent(project)
         val classpath = project.configurations.named(BUILD_TOOLS_API_CLASSPATH_CONFIGURATION_NAME)
@@ -204,7 +197,6 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
                 classLoadersCachingService,
                 classpath,
                 jvmToolchain,
-                runKotlinCompilerViaBuildToolsApi,
                 buildSessionService,
             )
             it.parameters.setupKotlinToolingDiagnosticsParameters(project)
@@ -219,7 +211,6 @@ internal open class BaseKotlinCompileConfig<TASK : KotlinCompile> : AbstractKotl
                 classLoadersCachingService,
                 classpath,
                 jvmToolchain,
-                runKotlinCompilerViaBuildToolsApi,
                 buildSessionService,
             )
             it.parameters.setupKotlinToolingDiagnosticsParameters(project)

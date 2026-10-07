@@ -15,11 +15,9 @@ import org.jetbrains.kotlin.ir.types.IrTypeSystemContextImpl
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.library.KotlinAbiVersion
 import org.jetbrains.kotlin.library.KotlinLibrary
-import org.jetbrains.kotlin.library.KotlinLibraryProperResolverWithAttributes
 import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.utils.DFS
 
 fun IrSymbol.kind(): BinarySymbolData.SymbolKind {
     return when (this) {
@@ -40,7 +38,7 @@ class CompatibilityMode(val abiVersion: KotlinAbiVersion) {
 
     init {
         require(abiVersion.isCompatible()) {
-            "Incompatible KLIB should have been discarded in ${KotlinLibraryProperResolverWithAttributes<Nothing>::libraryMatch.name}"
+            "Incompatible KLIB should have been already discarded in KlibLoader"
         }
     }
 
@@ -143,7 +141,7 @@ class IrModuleDeserializerWithBuiltIns(
     private val symbolTable: SymbolTable,
     mangler: KotlinMangler.IrMangler,
     onDeserializedClass: (IrClass, IdSignature) -> Unit,
-    private val delegate: IrModuleDeserializer
+    val delegate: IrModuleDeserializer
 ) : IrModuleDeserializer(moduleFragment, delegate.libraryAbiVersion) {
     private val signatureComputer = PublicIdSignatureComputer(mangler)
     private val syntheticProvider = IrSyntheticProvider(
@@ -271,10 +269,4 @@ class IrModuleDeserializerWithBuiltIns(
         irBuiltInsCallableIdMap[callableId]?.let { return it }
         return super.getAllMatchingSignatures(callableId, signatureKind)
     }
-}
-
-fun sortDependencies(moduleDependencies: Map<KotlinLibrary, List<KotlinLibrary>>): Collection<KotlinLibrary> {
-    return DFS.topologicalOrder(moduleDependencies.keys) { m ->
-        moduleDependencies.getValue(m)
-    }.reversed()
 }

@@ -32,6 +32,7 @@ internal fun collectGeneralConfigurationTimeMetrics(
     isProjectIsolationEnabled: Boolean,
     isProjectIsolationRequested: Boolean,
     isConfigurationCacheRequested: Boolean,
+    isBuildCacheUsed: Boolean
 ): MetricContainer {
     val configurationTimeMetrics = MetricContainer()
 
@@ -60,6 +61,7 @@ internal fun collectGeneralConfigurationTimeMetrics(
 
         configurationTimeMetrics.put(BooleanMetrics.GRADLE_CONFIGURATION_CACHE_ENABLED, isConfigurationCacheRequested)
         configurationTimeMetrics.put(BooleanMetrics.GRADLE_PROJECT_ISOLATION_ENABLED, isProjectIsolationRequested)
+        configurationTimeMetrics.put(BooleanMetrics.GRADLE_BUILD_CACHE_USED, isBuildCacheUsed)
     }
     configurationTimeMetrics.put(NumericalMetrics.STATISTICS_VISIT_ALL_PROJECTS_OVERHEAD, statisticOverhead)
 
@@ -91,6 +93,7 @@ internal fun collectProjectConfigurationTimeMetrics(
                     "kapt" -> {
                         configurationTimeMetrics.put(BooleanMetrics.ENABLED_KAPT, true)
                         for (dependency in dependencies) {
+                            if (dependency is ProjectDependency) continue //access projectDependency leads to a broken configuration cache for Gradle 8
                             when (dependency.group) {
                                 "com.google.dagger" -> configurationTimeMetrics.put(BooleanMetrics.ENABLED_DAGGER, true)
                                 "com.android.databinding" -> configurationTimeMetrics.put(BooleanMetrics.ENABLED_DATABINDING, true)
@@ -134,11 +137,7 @@ internal fun collectProjectConfigurationTimeMetrics(
             project.buildscript.sourceFile?.name?.endsWith(".kts") ?: false
         )
 
-        @Suppress("DEPRECATION")
-        configurationTimeMetrics.put(
-            BooleanMetrics.KOTLIN_BTA_USED,
-            project.kotlinPropertiesProvider.runKotlinCompilerViaBuildToolsApi.get()
-        )
+        configurationTimeMetrics.put(BooleanMetrics.KOTLIN_BTA_USED, true)
 
         configurationTimeMetrics.put(
             StringMetrics.KOTLIN_COMPILER_VERSION,
@@ -255,4 +254,3 @@ private fun reportLibrariesVersions(
         }
     }
 }
-

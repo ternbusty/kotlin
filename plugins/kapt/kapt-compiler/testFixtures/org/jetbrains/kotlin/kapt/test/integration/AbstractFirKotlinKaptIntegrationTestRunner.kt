@@ -5,7 +5,6 @@
 
 package org.jetbrains.kotlin.kapt.test.integration
 
-import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.kapt.base.util.doOpenInternalPackagesIfRequired
 import org.jetbrains.kotlin.kapt.test.JvmCompilerWithKaptFacade
 import org.jetbrains.kotlin.kapt.test.KaptContextBinaryArtifact
@@ -13,6 +12,8 @@ import org.jetbrains.kotlin.kapt.test.KaptEnvironmentConfigurator
 import org.jetbrains.kotlin.kapt.test.KaptTestDirectives
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
 import org.jetbrains.kotlin.test.builders.TestConfigurationBuilder
+import org.jetbrains.kotlin.test.FirParser
+import org.jetbrains.kotlin.test.directives.FirDiagnosticsDirectives.FIR_PARSER
 import org.jetbrains.kotlin.test.model.DependencyKind
 import org.jetbrains.kotlin.test.model.FrontendKinds
 import org.jetbrains.kotlin.test.runners.AbstractKotlinCompilerJvmTest
@@ -27,7 +28,6 @@ import javax.lang.model.element.TypeElement
 class AbstractFirKotlinKaptIntegrationTestRunner(
     private val processorOptions: Map<String, String>,
     private val supportedAnnotations: List<String>,
-    private val additionalPluginExtension: IrGenerationExtension?,
     private val process: (Set<TypeElement>, RoundEnvironment, ProcessingEnvironment, FirKaptExtensionForTests) -> Unit
 ) : AbstractKotlinCompilerJvmTest() {
 
@@ -44,6 +44,7 @@ class AbstractFirKotlinKaptIntegrationTestRunner(
 
         defaultDirectives {
             +KaptTestDirectives.MAP_DIAGNOSTIC_LOCATIONS
+            FIR_PARSER with FirParser.LightTree
         }
 
         useConfigurators(
@@ -53,7 +54,7 @@ class AbstractFirKotlinKaptIntegrationTestRunner(
             { FirKaptIntegrationEnvironmentConfigurator(it, processorOptions, supportedAnnotations, process) }
         )
 
-        facadeStep { services -> JvmCompilerWithKaptFacade(services, additionalPluginExtension) }
+        facadeStep(::JvmCompilerWithKaptFacade)
         handlersStep(KaptContextBinaryArtifact.Kind, CompilationStage.FIRST) {
             useHandlers(::FirKaptIntegrationStubsDumpHandler, ::FirProcessorWasCalledHandler)
         }

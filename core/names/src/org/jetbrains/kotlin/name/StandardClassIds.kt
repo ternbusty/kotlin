@@ -50,6 +50,8 @@ object StandardClassIds {
     val Nothing = "Nothing".baseId()
     val Unit = "Unit".baseId()
     val Any = "Any".baseId()
+    val NonError = "NonError".baseId()
+    val RichError = "RichError".baseId()
     val Enum = "Enum".baseId()
     val Annotation = "Annotation".baseId()
     val Array = "Array".baseId()
@@ -109,6 +111,7 @@ object StandardClassIds {
     val elementTypeByUnsignedArrayType = unsignedArrayTypeByElementType.inverseMap()
 
     val constantAllowedTypes = primitiveTypes + unsignedTypes + String
+    val allIntegerTypes = signedIntegerTypes + unsignedTypes
 
     val Continuation = "Continuation".coroutinesId()
     val CoroutineContext = "CoroutineContext".coroutinesId()
@@ -198,10 +201,14 @@ object StandardClassIds {
         val DslMarker = "DslMarker".baseId()
         val IntroducedAt = "IntroducedAt".baseId()
 
+        val NumericClass = "NumericClass".baseId()
+
         val LowPriorityInOverloadResolution = "LowPriorityInOverloadResolution".internalId()
 
         val ConsistentCopyVisibility = "ConsistentCopyVisibility".baseId()
         val ExposedCopyVisibility = "ExposedCopyVisibility".baseId()
+
+        val WillBecomeValue = "WillBecomeValue".baseId()
 
         val HidesMembers = "HidesMembers".internalId()
         val DynamicExtension = "DynamicExtension".internalId()
@@ -266,6 +273,14 @@ object StandardClassIds {
 
         val UsedFromCompilerGeneratedCode = "UsedFromCompilerGeneratedCode".internalId()
 
+        /**
+         * `kotlin.internal.ReflectionPackageName`: a file annotation making the backend store the given package name
+         * in the reflective information of the classes declared in the file, instead of the real one.
+         *
+         * Used by the test infrastructure, which renames packages when compiling several tests into one batch.
+         */
+        val ReflectionPackageName = "ReflectionPackageName".internalId()
+
         object ParameterNames {
             val value = Name.identifier("value")
 
@@ -275,6 +290,8 @@ object StandardClassIds {
             val equalityBound = Name.identifier("bound")
 
             val sinceKotlinVersion = Name.identifier("version")
+
+            val actualizations = Name.identifier("actualizations")
 
             val deprecatedMessage = Name.identifier("message")
             val deprecatedLevel = Name.identifier("level")

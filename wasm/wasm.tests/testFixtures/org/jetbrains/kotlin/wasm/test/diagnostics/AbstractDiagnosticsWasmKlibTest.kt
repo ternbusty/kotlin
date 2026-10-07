@@ -26,7 +26,6 @@ import org.jetbrains.kotlin.test.frontend.fir.handlers.*
 import org.jetbrains.kotlin.test.model.DependencyKind
 import org.jetbrains.kotlin.test.model.FrontendKinds
 import org.jetbrains.kotlin.test.runners.AbstractKotlinCompilerTest
-import org.jetbrains.kotlin.test.services.LibraryProvider
 import org.jetbrains.kotlin.test.services.PhasedPipelineChecker
 import org.jetbrains.kotlin.test.services.TestPhase
 import org.jetbrains.kotlin.test.services.configuration.CommonEnvironmentConfigurator
@@ -50,7 +49,7 @@ abstract class AbstractWasmDiagnosticTestBase(
         }
 
         defaultDirectives {
-            LATEST_PHASE_IN_PIPELINE with TestPhase.BACKEND
+            LATEST_PHASE_IN_PIPELINE with TestPhase.CODEGEN
             DIAGNOSTICS with DEFAULT_UNUSED_DIAGNOSTICS.map { "-$it" }
         }
         useFailureSuppressors(
@@ -69,7 +68,6 @@ abstract class AbstractWasmDiagnosticTestBase(
             ::AdditionalDiagnosticsSourceFilesProvider,
             ::CoroutineHelpersSourceFilesProvider,
         )
-        useAdditionalService(::LibraryProvider)
 
         facadeStep(::FirCliWebFacade)
 

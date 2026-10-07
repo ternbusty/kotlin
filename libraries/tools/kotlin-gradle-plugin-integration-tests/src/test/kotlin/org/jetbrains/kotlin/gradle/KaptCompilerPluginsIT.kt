@@ -9,13 +9,13 @@ import org.gradle.util.GradleVersion
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.testbase.*
 import org.jetbrains.kotlin.gradle.uklibs.applyJvm
-import org.jetbrains.kotlin.testFederation.AffectedByCompilerPlugins
+import org.jetbrains.kotlin.testFederation.MustRunOnChangesInCompilerPlugins
 import org.junit.jupiter.api.DisplayName
 import kotlin.io.path.appendText
 
 @DisplayName("Kapt with compiler plugins")
 @OtherGradlePluginTests
-@AffectedByCompilerPlugins
+@MustRunOnChangesInCompilerPlugins
 class KaptCompilerPluginsIT : KaptBaseIT() {
     override val defaultBuildOptions: BuildOptions =
         super.defaultBuildOptions.copyEnsuringK2()
@@ -103,6 +103,10 @@ class KaptCompilerPluginsIT : KaptBaseIT() {
                 assertFileInProjectContains(
                     interfaceStub,
                     "java.util.List<kotlin.jvm.functions.Function0<kotlin.Unit>> testListReturn()",
+                )
+                assertFileInProjectContains(
+                    interfaceStub,
+                    "kotlin.coroutines.Continuation<kotlin.jvm.functions.Function0<kotlin.Unit>>",
                 )
 
                 val classStub = "example/build/tmp/kapt3/stubs/main/repro/TestClass.java"
@@ -230,6 +234,8 @@ class KaptCompilerPluginsIT : KaptBaseIT() {
                 fun testReturn(): @PluginFunction () -> Unit
 
                 fun testListReturn(): List<@PluginFunction () -> Unit>
+
+                suspend fun testSuspendReturn(): @PluginFunction () -> Unit
             }
 
             class TestClass {

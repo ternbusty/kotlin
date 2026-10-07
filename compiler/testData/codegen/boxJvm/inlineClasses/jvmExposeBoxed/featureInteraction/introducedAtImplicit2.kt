@@ -1,10 +1,10 @@
 // WITH_STDLIB
-// TARGET_BACKEND: JVM_IR
+// TARGET_BACKEND: JVM
 // CHECK_BYTECODE_LISTING
 // JVM_EXPOSE_BOXED
 
 // FILE: Test.kt
-@file:OptIn(ExperimentalStdlibApi::class, ExperimentalVersionOverloading::class)
+@file:OptIn(ExperimentalStdlibApi::class)
 
 class MyClass(val s: String = "OK_implicit", @IntroducedAt(version = "3") val property: UInt = 2u)
 

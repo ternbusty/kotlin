@@ -15,7 +15,7 @@ import org.jetbrains.kotlin.cli.common.modules.ModuleBuilder
 import org.jetbrains.kotlin.cli.common.modules.ModuleChunk
 import org.jetbrains.kotlin.cli.jvm.addModularRootIfNotNull
 import org.jetbrains.kotlin.cli.jvm.config.*
-import org.jetbrains.kotlin.cli.pipeline.jvm.JvmBackendPipelinePhase
+import org.jetbrains.kotlin.cli.pipeline.jvm.JvmLoweringsPipelinePhase
 import org.jetbrains.kotlin.codegen.ClassBuilderFactories
 import org.jetbrains.kotlin.codegen.forTestCompile.ForTestCompileRuntime
 import org.jetbrains.kotlin.config.*
@@ -56,7 +56,6 @@ import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives.JDK_RELEA
 import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives.NO_NEW_JAVA_ANNOTATION_TARGETS
 import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives.NO_UNIFIED_NULL_CHECKS
 import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives.PARAMETERS_METADATA
-import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives.USE_INLINE_SCOPES_NUMBERS
 import org.jetbrains.kotlin.test.directives.LanguageSettingsDirectives.USE_TYPE_TABLE
 import org.jetbrains.kotlin.test.directives.model.DirectivesContainer
 import org.jetbrains.kotlin.test.directives.model.RegisteredDirectives
@@ -126,7 +125,7 @@ open class JvmEnvironmentConfigurator(testServices: TestServices) : EnvironmentC
                 files.add(provider.kotlinTestJarForTests())
             } else if (configurationKind.withMockRuntime) {
                 files.add(provider.minimalRuntimeJarForTests())
-                files.add(provider.scriptRuntimeJarForTests())
+                provider.scriptingCommonJarForTests()?.let(files::add)
             }
             if (configurationKind.withReflection) {
                 files.add(provider.reflectJarForTests())
@@ -201,7 +200,6 @@ open class JvmEnvironmentConfigurator(testServices: TestServices) : EnvironmentC
         register(ENABLE_DEBUG_MODE, JVMConfigurationKeys.ENABLE_DEBUG_MODE)
         register(ENHANCED_COROUTINES_DEBUGGING, JVMConfigurationKeys.ENHANCED_COROUTINES_DEBUGGING)
         register(NO_NEW_JAVA_ANNOTATION_TARGETS, JVMConfigurationKeys.NO_NEW_JAVA_ANNOTATION_TARGETS)
-        register(USE_INLINE_SCOPES_NUMBERS, JVMConfigurationKeys.USE_INLINE_SCOPES_NUMBERS)
         register(USE_PSI_CLASS_FILES_READING, JVMConfigurationKeys.USE_PSI_CLASS_FILES_READING)
         register(ALLOW_KOTLIN_PACKAGE, CLIConfigurationKeys.ALLOW_KOTLIN_PACKAGE)
         register(DISABLE_OPTIMIZATION, JVMConfigurationKeys.DISABLE_OPTIMIZATION)
@@ -244,12 +242,13 @@ open class JvmEnvironmentConfigurator(testServices: TestServices) : EnvironmentC
                 val provider = testServices.standardLibrariesPathProvider
                 val isJava9Module = module.isJava9Module
                 configuration.addModularRootIfNotNull(isJava9Module, "kotlin.stdlib", provider.runtimeJarForTests())
-                configuration.addModularRootIfNotNull(isJava9Module, "kotlin.script.runtime", provider.scriptRuntimeJarForTests())
+                configuration.addModularRootIfNotNull(isJava9Module, "kotlin.scripting.common", provider.scriptingCommonJarForTests())
             } else {
                 configuration.configureStandardLibs(
                     testServices.standardLibrariesPathProvider,
                     K2JVMCompilerArguments().also { it.noReflect = true }
                 )
+                testServices.standardLibrariesPathProvider.scriptingCommonJarForTests()?.let { configuration.addJvmClasspathRoot(it) }
             }
         }
         configuration.addJvmClasspathRoots(getLibraryFilesExceptRealRuntime(testServices, configurationKind, module.directives))
@@ -327,7 +326,7 @@ open class JvmEnvironmentConfigurator(testServices: TestServices) : EnvironmentC
             )
         )
         configuration.outputDirectory = outputDir
-        configuration.put(JvmBackendPipelinePhase.customClassBuilderFactory, ClassBuilderFactories.TEST)
+        configuration.put(JvmLoweringsPipelinePhase.customClassBuilderFactory, ClassBuilderFactories.TEST)
 
         configuration.addSourcesForDependsOnClosure(module, testServices)
     }

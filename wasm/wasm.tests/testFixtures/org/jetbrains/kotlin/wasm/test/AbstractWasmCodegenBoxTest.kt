@@ -33,6 +33,7 @@ import org.jetbrains.kotlin.test.model.FrontendKinds
 import org.jetbrains.kotlin.test.model.GroupingStageHandler
 import org.jetbrains.kotlin.test.services.AdditionalSourceProvider
 import org.jetbrains.kotlin.test.services.CompilationStage
+import org.jetbrains.kotlin.test.services.ReflectionPackageNameAnnotation
 import org.jetbrains.kotlin.test.services.SplittingModuleTransformerForBoxTests
 import org.jetbrains.kotlin.test.services.SplittingTestConfigurator
 import org.jetbrains.kotlin.test.services.configuration.WasmSecondStageEnvironmentConfigurator
@@ -79,6 +80,7 @@ abstract class AbstractWasmCodegenBoxTest(
                 DIAGNOSTICS with listOf("-infos")
             }
             useConfigurators(::WasmSecondStageEnvironmentConfigurator.bind(wasmTarget))
+            useAdditionalService { ReflectionPackageNameAnnotation }
             configureIgnoredTestSuppressor()
             useFailureSuppressors(
                 ::FirMetaInfoDiffSuppressor,
@@ -150,9 +152,9 @@ abstract class AbstractWasmWasiCodegenBoxTest : AbstractWasmCodegenBoxTest(Targe
 
 abstract class AbstractWasmJsCodegenSplittingTest : AbstractWasmJsCodegenBoxTest() {
     // Splitting multi-module runs must respect K2 multi-module ignore directives present
-    // in testdata. Support `IGNORE_BACKEND_K2_MULTI_MODULE` just like the single-stage base.
+    // in testdata. Support `IGNORE_BACKEND_MULTI_MODULE` just like the single-stage base.
     override val additionalIgnoreDirectives: List<ValueDirective<TargetBackend>>?
-        get() = listOf(CodegenTestDirectives.IGNORE_BACKEND_K2_MULTI_MODULE)
+        get() = listOf(CodegenTestDirectives.IGNORE_BACKEND_MULTI_MODULE)
 
     override fun configure(builder: TwoStageTestConfigurationBuilder): Unit = with(builder) {
         super.configure(this)

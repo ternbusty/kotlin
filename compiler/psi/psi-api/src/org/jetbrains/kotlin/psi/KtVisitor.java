@@ -7,6 +7,7 @@ package org.jetbrains.kotlin.psi;
 
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
+import kotlin.DeprecationLevel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -14,6 +15,25 @@ import java.util.List;
 
 import static org.jetbrains.kotlin.psi.psiUtil.PsiUtilsKt.tryFlattenStringConcatenationDescendants;
 
+/**
+ * The base visitor over the Kotlin PSI, implementing the visitor pattern for {@link KtElement}s.
+ *
+ * <p>Each concrete element type has a dedicated {@code visit*} method. Dispatch is triggered by
+ * {@link KtElement#accept(KtVisitor, Object)}, which invokes the method matching the element's runtime type. To handle a specific element
+ * type, subclass {@link KtVisitor} and override the corresponding method.
+ *
+ * <p>The {@code visit*} methods form a hierarchy that mirrors the PSI type hierarchy: an unoverridden method delegates to the method for
+ * its supertype (for example, {@code visitClass} falls back to {@code visitClassOrObject}, then to {@code visitNamedDeclaration}, and
+ * ultimately to {@link #visitKtElement}). Overriding a method higher up the hierarchy therefore provides a default for all of its subtypes.
+ *
+ * <p>This visitor does <b>not</b> recurse into children on its own; a {@code visit*} method visits only the element it is given. Use
+ * {@link KtTreeVisitor} for automatic recursive traversal.
+ *
+ * @param <R> the type of value returned by each {@code visit*} method
+ * @param <D> the type of the extra data threaded through the traversal (use {@link Void} when none is needed)
+ * @see KtVisitorVoid
+ * @see KtTreeVisitor
+ */
 public class KtVisitor<R, D> extends PsiElementVisitor {
     public R visitKtElement(@NotNull KtElement element, D data) {
         visitElement(element);
@@ -356,6 +376,11 @@ public class KtVisitor<R, D> extends PsiElementVisitor {
         return visitQualifiedExpression(expression, data);
     }
 
+    @KtExperimentalApi
+    public R visitErrorSafeQualifiedExpression(@NotNull KtErrorSafeQualifiedExpression expression, D data) {
+        return visitQualifiedExpression(expression, data);
+    }
+
     public R visitObjectLiteralExpression(@NotNull KtObjectLiteralExpression expression, D data) {
         return visitExpression(expression, data);
     }
@@ -440,7 +465,8 @@ public class KtVisitor<R, D> extends PsiElementVisitor {
      * @deprecated This method is obsolete because {@link KtSelfType} is obsolete.
      */
     @kotlin.Deprecated(
-            message = "This method is obsolete because 'KtSelfType' is obsolete."
+            message = "This method is obsolete because 'KtSelfType' is obsolete.",
+            level = DeprecationLevel.ERROR
     )
     @Deprecated
     public R visitSelfType(@NotNull KtSelfType type, D data) {
@@ -470,6 +496,11 @@ public class KtVisitor<R, D> extends PsiElementVisitor {
 
     public R visitIntersectionType(@NotNull KtIntersectionType definitelyNotNullType, D data) {
         return visitTypeElement(definitelyNotNullType, data);
+    }
+
+    @KtExperimentalApi
+    public R visitUnionType(@NotNull KtUnionType unionType, D data) {
+        return visitTypeElement(unionType, data);
     }
 
     public R visitTypeProjection(@NotNull KtTypeProjection typeProjection, D data) {

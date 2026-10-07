@@ -59,14 +59,14 @@ internal class KonanInteropModuleDeserializer(
         override val klib: KotlinLibrary,
         private val isLibraryCached: Boolean,
         private val linker: KonanIrLinker,
-) : IrModuleDeserializer(moduleFragment, klib.versions.abiVersion ?: KotlinAbiVersion.CURRENT) {
+) : IrModuleDeserializer(moduleFragment, klib.versions.abiVersion ?: KotlinAbiVersion.CURRENT), CInteropModuleDeserializer {
     init {
         require(klib.isCInteropLibrary())
     }
 
     private val symbolTable = linker.symbolTable
     private val metadataReader = KlibMetadataReader(klib)
-    private val moduleHeaderProto: KlibMetadataProtoBuf.Header by lazy { parseModuleHeader(klib.metadata.moduleHeaderData) }
+    private val moduleHeaderProto: KlibMetadataProtoBuf.Header? by lazy { parseModuleHeader(klib.metadata.moduleHeaderData) }
 
     // Interop Klibs may declare only one package, and its FQ name is declared in the manifest.
     private val definedPackageFqName: FqName = klib.packageFqName?.let(::FqName)
@@ -83,6 +83,10 @@ internal class KonanInteropModuleDeserializer(
             super.onNewClass(clazz)
             linker.fakeOverrideBuilder.enqueueClass(clazz, clazz.symbol.signature!!, CompatibilityMode.CURRENT)
         }
+    }
+
+    override fun hasAnyLinkedIrDeclarations(): Boolean {
+        return declarationTracker.deserializedDeclarations.isNotEmpty()
     }
 
     private val transformer = CInteropKlibMetadata2IRTransformer(
@@ -279,7 +283,7 @@ internal class KonanInteropModuleDeserializer(
         private fun loadAndCacheMetadata(): Map<MetadataDeclarationId, List<Any>> {
             val metadataComponent = klib.metadata
             val provider = object : KlibModuleMetadata.MetadataLibraryProvider {
-                override val moduleHeaderData get() = metadataComponent.moduleHeaderData
+                override val moduleHeaderData get() = metadataComponent.moduleHeaderData ?: error("No metadata header data found")
                 override val metadataVersion = KlibMetadataVersion((klib.metadataVersion?.toArray()
                         ?: error("No metadata version specified in ${klib.path}")))
 

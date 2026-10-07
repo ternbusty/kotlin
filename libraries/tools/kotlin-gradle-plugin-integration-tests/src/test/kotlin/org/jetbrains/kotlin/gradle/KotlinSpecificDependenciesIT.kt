@@ -47,7 +47,7 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
                 //language=groovy
                 """
                 |
-                |kotlin.coreLibrariesVersion = "1.9.0"
+                |kotlin.coreKotlinLibrariesVersion.set("1.9.0")
                 """.trimMargin()
             )
 
@@ -135,7 +135,8 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
             buildOptions = defaultBuildOptions
                 .copy(
                     androidVersion = agpVersion,
-                ),
+                )
+                .suppressAgpWarningIsProperty(gradleVersion),
             buildJdk = jdkVersion.location
         ) {
             removeDependencies(buildGradle)
@@ -158,9 +159,11 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
         project(
             "AndroidLibraryKotlinProject",
             gradleVersion,
-            buildOptions = defaultBuildOptions.copy(
-                androidVersion = agpVersion,
-            ),
+            buildOptions = defaultBuildOptions
+                .copy(
+                    androidVersion = agpVersion,
+                )
+                .suppressAgpWarningIsProperty(gradleVersion),
             buildJdk = jdkVersion.location
         ) {
             removeDependencies(buildGradle)
@@ -603,7 +606,7 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
             buildGradle.appendText(
                 """
                 
-                kotlin.coreLibrariesVersion = "$customVersion"
+                kotlin.coreKotlinLibrariesVersion.set("$customVersion")
                 dependencies {
                     testImplementation("org.jetbrains.kotlin:kotlin-reflect")
                     testImplementation("org.jetbrains.kotlin:kotlin-test")
@@ -650,9 +653,6 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
     @JvmGradlePluginTests
     @DisplayName("KT-65271: Don't mutate dependency after it is being finalized")
     @GradleTest
-    @GradleTestVersions(
-        additionalVersions = [TestVersions.Gradle.G_8_6]
-    )
     @TestMetadata("kt-65271-test-suite-with-kotlin-test-dependency")
     fun testDontMutateDependencyAfterItIsFinalized(gradleVersion: GradleVersion) {
         project("kt-65271-test-suite-with-kotlin-test-dependency", gradleVersion) {
@@ -675,8 +675,8 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
                 "\ndependencies { \"$configuration\"(\"$kotlinTestMultiplatformDependency\") }"
             }
         )
-        classpathElementsExpectedByTask.forEach { [task, expected] ->
-            val [notInClasspath, inClasspath] = expected.partition { it.startsWith("!") }
+        classpathElementsExpectedByTask.forEach { (task, expected) ->
+            val (notInClasspath, inClasspath) = expected.partition { it.startsWith("!") }
             checkTaskCompileClasspath(
                 task,
                 inClasspath,
@@ -684,8 +684,8 @@ class KotlinSpecificDependenciesIT : KGPBaseTest() {
                 isBuildGradleKts = isBuildGradleKts
             )
         }
-        filesExpectedByConfiguration.forEach { [configuration, expected] ->
-            val [notInItems, inItems] = expected.partition { it.startsWith("!") }
+        filesExpectedByConfiguration.forEach { (configuration, expected) ->
+            val (notInItems, inItems) = expected.partition { it.startsWith("!") }
             checkConfigurationContent(
                 configuration,
                 inItems,

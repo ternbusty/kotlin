@@ -3,6 +3,8 @@
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
+@file:Suppress("TYPEALIAS_EXPANSION_DEPRECATION")
+
 package org.jetbrains.kotlin.gradle.targets.js.npm.resolver
 
 import org.gradle.api.Project
@@ -18,6 +20,8 @@ import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.util.Path
+import org.jetbrains.kotlin.gradle.InternalKotlinGradlePluginApi
+import org.jetbrains.kotlin.gradle.npm.npmDependenciesCollector
 import org.jetbrains.kotlin.gradle.plugin.KotlinCompilation
 import org.jetbrains.kotlin.gradle.plugin.categoryByName
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinUsages
@@ -27,6 +31,7 @@ import org.jetbrains.kotlin.gradle.plugin.sources.KotlinDependencyScope
 import org.jetbrains.kotlin.gradle.plugin.sources.compilationDependencyConfigurationByScope
 import org.jetbrains.kotlin.gradle.plugin.sources.sourceSetDependencyConfigurationByScope
 import org.jetbrains.kotlin.gradle.plugin.usesPlatformOf
+import org.jetbrains.kotlin.gradle.targets.js.internal.jsToolingProject
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrCompilation
 import org.jetbrains.kotlin.gradle.targets.js.ir.KotlinJsIrTarget
 import org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootPlugin.Companion.kotlinNodeJsRootExtension
@@ -35,10 +40,7 @@ import org.jetbrains.kotlin.gradle.targets.js.npm.*
 import org.jetbrains.kotlin.gradle.targets.js.npm.tasks.KotlinPackageJsonTask
 import org.jetbrains.kotlin.gradle.targets.js.webTargetVariant
 import org.jetbrains.kotlin.gradle.tasks.registerTask
-import org.jetbrains.kotlin.gradle.utils.createConsumable
-import org.jetbrains.kotlin.gradle.utils.createResolvable
-import org.jetbrains.kotlin.gradle.utils.currentBuild
-import org.jetbrains.kotlin.gradle.utils.setInvisibleIfSupported
+import org.jetbrains.kotlin.gradle.utils.*
 import java.io.Serializable
 import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin.Companion.kotlinNodeJsRootExtension as wasmKotlinNodeJsRootExtension
 import org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsRootPlugin.Companion.kotlinNpmResolutionManager as wasmKotlinNpmResolutionManager
@@ -108,8 +110,8 @@ class KotlinCompilationNpmResolver(
         }
 
         val nodeJsRoot = compilation.webTargetVariant(
-            { project.rootProject.kotlinNodeJsRootExtension },
-            { project.rootProject.wasmKotlinNodeJsRootExtension },
+            { project.jsToolingProject().kotlinNodeJsRootExtension },
+            { project.jsToolingProject().wasmKotlinNodeJsRootExtension },
         )
 
         nodeJsRoot.packageJsonUmbrellaTaskProvider.configure {
@@ -146,10 +148,24 @@ class KotlinCompilationNpmResolver(
             return _compilationNpmResolution ?: run {
                 val visitor = ConfigurationVisitor()
                 visitor.visit(aggregatedConfiguration)
-                visitor.toPackageJsonProducer()
+                visitor.toPackageJsonProducer(npmDependenciesFromCollector)
             }.also {
                 _compilationNpmResolution = it
             }
+        }
+
+    /**
+     * npm dependencies declared via the npm dependencies collector
+     * of all source sets of this [compilation] and its associated compilations.
+     */
+    private val npmDependenciesFromCollector: Set<NpmDependencyDeclaration>
+        get() {
+            val compilations = listOf(compilation) + compilation.allAssociatedCompilations
+            return compilations
+                .flatMap { it.allKotlinSourceSets }
+                .flatMap { sourceSet ->
+                    sourceSet.npmDependenciesCollector.npmDependencies.get().map { it.toNpmDependencyDeclaration() }
+                }.toSet()
         }
 
     @Synchronized
@@ -201,6 +217,7 @@ class KotlinCompilationNpmResolver(
         }.get()
     }
 
+    @InternalKotlinGradlePluginApi
     inner class ConfigurationVisitor {
         private val internalDependencies = mutableSetOf<InternalDependency>()
         private val internalCompositeDependencies = mutableSetOf<CompositeDependency>()
@@ -217,7 +234,7 @@ class KotlinCompilationNpmResolver(
 
             configuration.allDependencies.forEach { dependency ->
                 when (dependency) {
-                    is NpmDependency -> externalNpmDependencies.add(dependency.toDeclaration())
+                    is NpmDependencyDeprecated -> externalNpmDependencies.add(dependency.toNpmDependencyDeclaration())
                     is FileCollectionDependency -> fileCollectionDependencies.add(
                         FileCollectionExternalGradleDependency(
                             dependency.files.files,
@@ -237,17 +254,6 @@ class KotlinCompilationNpmResolver(
                         projectResolver[main].compilation.outputModuleName.get()
                     )
                 )
-            }
-
-            val hasPublicNpmDependencies = externalNpmDependencies.isNotEmpty()
-
-            if (compilation.isMain() && hasPublicNpmDependencies) {
-                project.tasks
-                    .withType(Zip::class.java)
-                    .named(npmProject.target.artifactsTaskName)
-                    .configure { task ->
-                        task.from(publicPackageJsonTaskHolder)
-                    }
             }
         }
 
@@ -326,7 +332,9 @@ class KotlinCompilationNpmResolver(
                 }
         }
 
-        fun toPackageJsonProducer() = KotlinCompilationNpmResolution(
+        fun toPackageJsonProducer(
+            npmDependenciesFromCollector: Set<NpmDependencyDeclaration>,
+        ) = KotlinCompilationNpmResolution(
             internalDependencies = internalDependencies,
             internalCompositeDependencies = internalCompositeDependencies,
             externalGradleDependencies = externalGradleDependencies.map {
@@ -336,14 +344,29 @@ class KotlinCompilationNpmResolver(
                     it.artifact.file
                 )
             },
-            externalNpmDependencies = externalNpmDependencies,
+            externalNpmDependencies = externalNpmDependencies + npmDependenciesFromCollector,
             fileCollectionDependencies = fileCollectionDependencies,
             projectPath = projectPath,
             compilationDisambiguatedName = compilationDisambiguatedName,
             npmProjectName = compilation.outputModuleName.get(),
             npmProjectVersion = npmVersion,
             tasksRequirements = rootResolver.tasksRequirements
-        )
+        ).also {
+            addPublicPackageJsonToPublishableKlib(it)
+        }
+    }
+
+    // TODO: Stop doing that, see KT-89806
+    private fun addPublicPackageJsonToPublishableKlib(resolution: KotlinCompilationNpmResolution) {
+        val hasPublicNpmDependencies = resolution.externalNpmDependencies.isNotEmpty()
+
+        if (compilation.isMain() && hasPublicNpmDependencies) {
+            project.tasks
+                .named(npmProject.target.artifactsTaskName, Zip::class.java)
+                .configure { task ->
+                    task.from(publicPackageJsonTaskHolder)
+                }
+        }
     }
 
     /**

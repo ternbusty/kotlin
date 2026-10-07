@@ -5,7 +5,7 @@
   "compilerType": "K2",
   "hasErrors": true,
   "filesCount": 1,
-  "linesCount": 1,
+  "linesCount": 3,
   "measuredCpuAndUserTime": false,
   "initStats": {
     "nanos": $UINT$
@@ -151,6 +151,13 @@
       "time": {
         "nanos": $UINT$
       }
+    },
+    {
+      "parentPhaseType": IrPreLowering,
+      "name": "TailrecCheckerLowering",
+      "time": {
+        "nanos": $UINT$
+      }
     }
   ],
   "klibElementStats": [
@@ -245,12 +252,12 @@
   ],
   "gcStats": [
     {
-      "kind": "PS MarkSweep",
+      "kind": $QUOTEDSTRING$,
       "count": $UINT$,
       "millis": $UINT$
     },
     {
-      "kind": "PS Scavenge",
+      "kind": $QUOTEDSTRING$,
       "count": $UINT$,
       "millis": $UINT$
     }

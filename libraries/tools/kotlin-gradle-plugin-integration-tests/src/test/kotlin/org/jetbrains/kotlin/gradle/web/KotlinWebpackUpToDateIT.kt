@@ -2,7 +2,6 @@
  * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
-@file:OptIn(ExperimentalWasmDsl::class)
 
 package org.jetbrains.kotlin.gradle.web
 
@@ -10,7 +9,6 @@ import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.kotlin
 import org.gradle.kotlin.dsl.withType
 import org.gradle.util.GradleVersion
-import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.targets.js.npm.BaseNpmExtension
 import org.jetbrains.kotlin.gradle.targets.js.npm.LockFileMismatchReport
 import org.jetbrains.kotlin.gradle.targets.js.npm.RequiresNpmDependenciesTask
@@ -124,7 +122,7 @@ sealed class KotlinWebpackUpToDateIT(
                             .trim()
                     }
 
-                val expectedFileBasedDepPath = projectPath.absolute().resolve("sp2/foo-npm-dep").pathString
+                val expectedFileBasedDepPath = projectPath.toRealPath().resolve("sp2/foo-npm-dep").pathString
                 assertEquals(
                     "$buildTaskPath doNotCacheIf=true. Task depends on file-based NPM dependencies: [$expectedFileBasedDepPath]. See KT-86309.",
                     fileBasedNpmDepsLogLines,

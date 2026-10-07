@@ -5,6 +5,7 @@
 
 package kotlin.jvm.internal;
 
+import kotlin.ExperimentalContextParameters;
 import kotlin.SinceKotlin;
 import kotlin.jvm.KotlinReflectionNotSupportedError;
 import kotlin.reflect.*;
@@ -33,6 +34,10 @@ public abstract class CallableReference implements KCallable, Serializable, Kotl
 
     @SinceKotlin(version = "1.1")
     protected final Object receiver;
+
+    @SinceKotlin(version = "2.5")
+    @ExperimentalContextParameters
+    protected Object[] boundContextArguments;
 
     @SinceKotlin(version = "1.4")
     private final Class owner;
@@ -83,6 +88,12 @@ public abstract class CallableReference implements KCallable, Serializable, Kotl
         return receiver;
     }
 
+    @SinceKotlin(version = "2.5")
+    @ExperimentalContextParameters
+    public Object[] getBoundContextArguments() {
+        return boundContextArguments;
+    }
+
     @SinceKotlin(version = "1.1")
     public KCallable compute() {
         KCallable result = reflected;
@@ -112,6 +123,14 @@ public abstract class CallableReference implements KCallable, Serializable, Kotl
     public KDeclarationContainer getOwner() {
         return owner == null ? null :
                isTopLevel ? Reflection.getOrCreateKotlinPackage(owner) : Reflection.getOrCreateKotlinClass(owner);
+    }
+
+    private boolean isLocalFunction() {
+        return owner != null && owner.getName().equals("kotlin.jvm.internal.Intrinsics$Kotlin");
+    }
+
+    private boolean isLocalProperty() {
+        return signature.startsWith("<v#");
     }
 
     /**
@@ -202,5 +221,18 @@ public abstract class CallableReference implements KCallable, Serializable, Kotl
     @SinceKotlin(version = "1.3")
     public boolean isSuspend() {
         return getReflected().isSuspend();
+    }
+
+    @Override
+    @ExperimentalCompanionExtensions
+    public KClass<?> getCompanionExtensionClass() {
+        return getReflected().getCompanionExtensionClass();
+    }
+
+    @Override
+    @Nullable
+    public KDeclarationContainer getContainer() {
+        if (isLocalFunction() || isLocalProperty()) return null;
+        return getOwner();
     }
 }

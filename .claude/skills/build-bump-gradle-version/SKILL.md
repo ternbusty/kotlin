@@ -35,8 +35,7 @@ It is one of three Gradle-version skills; make sure you're in the right one:
 
 **Tooling:** per the project `CLAUDE.md`, use JetBrains IDE MCP tools for every read and write on
 project files — `mcp__idea__read_file`, `mcp__idea__search_text` / `mcp__idea__search_regex`,
-`mcp__idea__get_symbol_info`, and whichever edit tool this MCP server exposes
-(`mcp__idea__replace_text_in_file` or `mcp__idea__apply_patch`) — not `Read`/`Edit`/`Grep`/`Glob`,
+`mcp__idea__get_symbol_info`, and `mcp__idea__apply_patch` for edits — not `Read`/`Edit`/`Grep`/`Glob`,
 which bypass the IDE's view of open buffers. Use the default `Bash` tool for Gradle commands (never
 `execute_terminal_command`). After editing any file, run `mcp__idea__get_file_problems` with
 `errorsOnly: false` and fix warnings attributable to your change.
@@ -369,9 +368,9 @@ Finish by reporting:
 
 ## Out of scope
 
-- **The other four `gradle-wrapper.properties` files** —
+- **The other 3 `gradle-wrapper.properties` files** —
   `kotlin-native/performance/`, `kotlin-native/backend.native/tests/samples/`,
-  `libraries/tools/kotlin-stdlib-docs/`, `libraries/tools/kotlin-stdlib-docs-legacy/` — are
+  `libraries/tools/kotlin-stdlib-docs/` — are
   independent standalone sub-builds, intentionally pinned to their own Gradle versions. Do
   **not** sync them with the root wrapper.
 - **`GRADLE_COMMON_COMPILE_API_VERSION`** → `build-tools-bump-gradle-api`.

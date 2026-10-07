@@ -2,6 +2,8 @@
  * Copyright 2010-2026 JetBrains s.r.o. and Kotlin Programming Language contributors.
  * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
+@file:OptIn(KtIdeApi::class, KtImplementationDetail::class)
+
 package org.jetbrains.kotlin.psi
 
 import com.intellij.lang.ASTNode
@@ -9,8 +11,9 @@ import com.intellij.navigation.ItemPresentation
 import com.intellij.navigation.ItemPresentationProviders
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
-import org.jetbrains.kotlin.KtStubBasedElementTypes
+import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.lexer.KtTokens
+import org.jetbrains.kotlin.psi.psiUtil.containingScript
 import org.jetbrains.kotlin.psi.psiUtil.isContractPresentPsiCheck
 import org.jetbrains.kotlin.psi.psiUtil.isKtFile
 import org.jetbrains.kotlin.psi.psiUtil.isLegacyContractPresentPsiCheck
@@ -32,13 +35,21 @@ import org.jetbrains.kotlin.psi.typeRefHelpers.getTypeReference
  *
  * Note: this class is not intended to be extended and is marked `open` solely for backward compatibility.
  */
+@SubclassOptInRequired(KtImplementationDetail::class)
 open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, KtFunction, KtDeclarationWithInitializer {
+    @KtImplementationDetail
     constructor(node: ASTNode) : super(node)
-    constructor(stub: KotlinFunctionStub) : super(stub, /* nodeType = */ KtStubBasedElementTypes.FUNCTION)
+
+    @KtImplementationDetail
+    constructor(stub: KotlinFunctionStub) : super(stub, /* nodeType = */ KtNodeTypes.FUN)
 
     override fun <R, D> accept(visitor: KtVisitor<R, D>, data: D): R =
         visitor.visitNamedFunction(this, data)
 
+    /**
+     * Returns `true` if the type parameter list appears before the function name (`fun <T> foo()`), as opposed to a `where` clause or type
+     * parameters written after the name.
+     */
     open fun hasTypeParameterListBeforeFunctionName(): Boolean {
         greenStub?.let {
             return it.hasTypeParameterListBeforeFunctionName
@@ -56,7 +67,11 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
         return equalsToken == null
     }
 
-    @get:IfNotParsed // "function" with no "fun" keyword is created by parser for "{...}" on top-level or in the class body
+    /**
+     * The `fun` keyword, or `null` if it is absent (the parser produces a keyword-less function for a bare `{...}` at the top level or in a
+     * class body).
+     */
+    @get:IfNotParsed
     open val funKeyword: PsiElement?
         get() = findChildByType(KtTokens.FUN_KEYWORD)
 
@@ -73,8 +88,7 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
         ItemPresentationProviders.getItemPresentation(/* element = */ this)
 
     override fun getValueParameterList(): KtParameterList? =
-        @Suppress("DEPRECATION") // KT-78356
-        getStubOrPsiChild(KtStubBasedElementTypes.VALUE_PARAMETER_LIST)
+        getStubOrPsiChild(KtNodeTypes.VALUE_PARAMETER_LIST, KtParameterList::class.java)
 
     override fun getValueParameters(): List<KtParameter> =
         valueParameterList?.parameters.orEmpty()
@@ -118,7 +132,7 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
         if (!stub.isExtension) {
             return null
         }
-        return getStubOrPsiChildrenAsList(KtStubBasedElementTypes.TYPE_REFERENCE).firstOrNull()
+        return typeReferences().firstOrNull()
     }
 
     private val receiverTypeRefByTree: KtTypeReference?
@@ -139,16 +153,19 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
     override fun getTypeReference(): KtTypeReference? {
         val stub = greenStub ?: return getTypeReference(declaration = this)
 
-        val typeReferences = getStubOrPsiChildrenAsList(KtStubBasedElementTypes.TYPE_REFERENCE)
+        val typeReferences = typeReferences()
         val returnTypeIndex = if (stub.isExtension) 1 else 0
         return if (returnTypeIndex < typeReferences.size) typeReferences[returnTypeIndex] else null
     }
 
+    private fun typeReferences(): Array<out KtTypeReference> =
+        getStubOrPsiChildren(KtNodeTypes.TYPE_REFERENCE, KtTypeReference.EMPTY_ARRAY)
+
     @Deprecated(
         message = "Use setFunctionTypeReference(typeRef) instead",
         replaceWith = ReplaceWith("this.setFunctionTypeReference(typeRef)", "org.jetbrains.kotlin.idea.base.psi.setFunctionTypeReference"),
+        level = DeprecationLevel.ERROR,
     )
-    @OptIn(KtNonPublicApi::class)
     override fun setTypeReference(typeRef: KtTypeReference?): KtTypeReference? =
         KtPsiMutationService.getInstance().setFunctionTypeReference(this, typeRef)
 
@@ -156,6 +173,10 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
         findChildByType(KtTokens.COLON)
 
     override fun isLocal(): Boolean {
+        // Checked before `parent` since it forces AST loading for script declarations
+        @OptIn(KtExperimentalApi::class)
+        if (containingScript != null) return false
+
         val parent = parent
         return when {
             parent == null -> {
@@ -164,14 +185,19 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
             }
             isKtFile(parent) -> false
             parent is KtClassBody -> false
-            parent.parent is KtScript -> false
             else -> true
         }
     }
 
+    /**
+     * `true` if this is an anonymous function (a local function without a name, `fun() { ... }`).
+     */
     open val isAnonymous: Boolean
         get() = name == null && isLocal
 
+    /**
+     * `true` if this function is declared directly at the top level of a file.
+     */
     open val isTopLevel: Boolean
         get() {
             greenStub?.let {
@@ -180,14 +206,18 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
             return isKtFile(parent)
         }
 
+    /**
+     * Always returns `false`: changes inside a function never affect the out-of-code-block modification count.
+     *
+     * Kept for compatibility with potential plugins.
+     */
     @Suppress("unused") // keep for compatibility with potential plugins
     open fun shouldChangeModificationCount(place: PsiElement?): Boolean =
         // Suppress Java check for out-of-block
         false
 
     override fun getContractDescription(): KtContractEffectList? =
-        @Suppress("DEPRECATION") // KT-78356
-        getStubOrPsiChild(KtStubBasedElementTypes.CONTRACT_EFFECT_LIST)
+        getStubOrPsiChild(KtNodeTypes.CONTRACT_EFFECT_LIST, KtContractEffectList::class.java)
 
     @OptIn(KtImplementationDetail::class)
     override fun mayHaveContract(): Boolean {
@@ -197,10 +227,20 @@ open class KtNamedFunction : KtTypeParameterListOwnerStub<KotlinFunctionStub>, K
         return isLegacyContractPresentPsiCheck()
     }
 
+    /**
+     * Returns whether this function may declare a contract, taking into account whether contracts are allowed on member functions via
+     * [isAllowedOnMembers]. As with [mayHaveContract], `false` is definitive but `true` is not a guarantee.
+     */
     open fun mayHaveContract(isAllowedOnMembers: Boolean): Boolean {
         greenStub?.let {
             return it.mayHaveContract
         }
         return isContractPresentPsiCheck(isAllowedOnMembers)
+    }
+
+    companion object {
+        /** A shared empty array, which can be reused to avoid unnecessary allocations. */
+        @JvmField
+        val EMPTY_ARRAY: Array<KtNamedFunction> = emptyArray()
     }
 }

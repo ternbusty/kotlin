@@ -21,6 +21,8 @@ fun main(args: Array<String>) {
         testGroup(testsRoot, "plugins/plugin-sandbox/testData") {
             testClass<AbstractFirPsiPluginDiagnosticTest> {
                 model("diagnostics", excludedPattern = CUSTOM_TEST_DATA_EXTENSION_PATTERN)
+                model("intentionallyEmpty")
+                model("intentionallyNonExistent")
             }
 
             testClass<AbstractFirLightTreeJvmPluginIrTextTest> {
@@ -47,6 +49,10 @@ fun main(args: Array<String>) {
                 model("box", excludedPattern = CUSTOM_TEST_DATA_EXTENSION_PATTERN)
             }
 
+            testClass<AbstractFirJvmPsiPluginBlackBoxCodegenTest> {
+                model("box", excludedPattern = CUSTOM_TEST_DATA_EXTENSION_PATTERN)
+            }
+
             testClass<AbstractFirJvmLightTreePluginBlackBoxCodegenWithSeparateKmpCompilationTest> {
                 model("box", excludedPattern = CUSTOM_TEST_DATA_EXTENSION_PATTERN)
             }
@@ -69,6 +75,14 @@ fun main(args: Array<String>) {
 
             testClass<AbstractFirMetadataPluginSandboxTest> {
                 model("metadata")
+            }
+
+            testClass<AbstractFirMetadataPluginSandboxTest>(suiteTestClassName = "EmptyTestGenerated") {
+                model("intentionallyEmpty")
+            }
+
+            testClass<AbstractFirMetadataPluginSandboxTest>(suiteTestClassName = "NonExistentTestGenerated") {
+                model("intentionallyNonExistent")
             }
 
             testClass<AbstractNativeCodegenBoxTest>(
